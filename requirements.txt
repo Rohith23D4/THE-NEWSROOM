@@ -1,0 +1,5 @@
+fastapi==0.141.1
+uvicorn==0.52.4
+requests==2.34.2
+googlenewsdecoder==0.2.1
+selectolax==0.4.12

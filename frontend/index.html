@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>The Newsroom</title>
+
+    <link
+        rel="stylesheet"
+        href="styles.css?v=sandstone-blue-actions-27"
+    >
+
+
+<style id="one-line-category-navigation">
+.category-navigation {
+    width: 100%;
+    overflow: hidden;
+}
+
+.category-container {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    gap: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    white-space: nowrap !important;
+}
+
+.category-container .category-button {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+    display: block !important;
+}
+</style>
+
+</head>
+
+
+<body>
+
+
+    <!-- =========================
+         HEADER
+    ========================== -->
+
+    <header class="site-header">
+
+        <div class="header-content">
+
+            <div class="brand">
+
+                <a
+                    class="brand-emblem"
+                    href="/"
+                    aria-label="The Newsroom home"
+                >TNR</a>
+
+                <div>
+
+                    <h1>THE NEWSROOM</h1>
+
+                    <p>
+                        <span class="presenter-brand">Presented by <strong>ROHITHREDDYLOKASANI</strong></span>
+                    </p>
+
+                </div>
+
+            </div>
+
+            <div class="header-actions">
+                <button id="auth-open" class="auth-open" type="button">Sign in</button>
+                <a class="brand-direction" href="/" aria-label="NEWS compass: North up, East right, West left, South down">
+                    <span class="direction-point direction-n"><span>N</span><span class="brand-direction-arrow" aria-hidden="true">↑</span></span>
+                    <span class="direction-point direction-e"><span class="brand-direction-arrow" aria-hidden="true">→</span><span>E</span></span>
+                    <span class="direction-point direction-w"><span>W</span><span class="brand-direction-arrow" aria-hidden="true">←</span></span>
+                    <span class="direction-point direction-s"><span class="brand-direction-arrow" aria-hidden="true">↓</span><span>S</span></span>
+                    <span class="compass-center" aria-hidden="true">✦</span>
+                </a>
+            </div>
+
+        </div>
+
+        <div class="header-datetime" aria-label="Current date and time in India">
+            <time id="header-date" class="header-date"></time>
+            <time id="header-time" class="header-time"></time>
+        </div>
+
+        <button
+            id="theme-toggle"
+            class="theme-toggle"
+            type="button"
+            aria-label="Toggle dark mode"
+            title="Toggle dark mode"
+        >
+            🌙
+        </button>
+
+    </header>
+
+    <dialog id="auth-dialog" class="auth-dialog" aria-labelledby="auth-title">
+        <button id="auth-close" class="auth-close" type="button" aria-label="Close sign-in dialog">×</button>
+        <section id="auth-form-view">
+            <p class="auth-eyebrow">THE NEWSROOM</p>
+            <h2 id="auth-title">Sign in</h2>
+            <p class="auth-intro">Sign in or create an account to continue.</p>
+            <div class="auth-google-wrap">
+                <div id="google-signin-button" class="google-signin-button" hidden></div>
+                <button id="google-signin-fallback" class="google-signin-fallback" type="button">
+                    <span class="google-mark" aria-hidden="true">G</span>
+                    <span>Continue with Google</span>
+                </button>
+            </div>
+            <div class="auth-divider" aria-hidden="true"><span>or continue with email</span></div>
+            <form id="auth-form">
+                <label for="auth-email">Email address</label>
+                <input id="auth-email" name="email" type="email" autocomplete="email" required maxlength="254">
+                <label for="auth-password">Password</label>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+                <p id="auth-message" class="auth-message" role="status" aria-live="polite"></p>
+                <button id="auth-submit" class="auth-submit" type="submit">Sign in</button>
+            </form>
+            <button id="auth-mode-toggle" class="auth-mode-toggle" type="button">Create an account</button>
+        </section>
+        <section id="auth-account-view" hidden>
+            <p class="auth-eyebrow">YOUR ACCOUNT</p>
+            <h2>You're signed in</h2>
+            <p id="auth-account-email" class="auth-account-email"></p>
+            <p id="auth-account-message" class="auth-message" role="status" aria-live="polite"></p>
+            <button id="auth-logout" class="auth-submit" type="button">Sign out</button>
+        </section>
+    </dialog>
+
+
+<!-- =========================
+     CATEGORY NAVIGATION
+========================== -->
+
+<nav class="category-navigation">
+
+    <div class="category-container">
+
+        <button class="category-button active" data-category="latest">
+            📰 LATEST
+        </button>
+
+        <button class="category-button" data-category="India">
+            🇮🇳 INDIA
+        </button>
+
+        <button class="category-button" data-category="telangana">
+            🕌 TELANGANA
+        </button>
+
+        <button class="category-button" data-category="andhra-pradesh">
+            🛕 ANDHRA PRADESH
+        </button>
+
+        <button class="category-button" data-category="karnataka">
+            🏰 KARNATAKA
+        </button>
+
+        <button class="category-button" data-category="tamil-nadu">
+            🗿 TAMIL NADU
+        </button>
+
+        <button class="category-button" data-category="kerala">
+            🏛️ KERALA
+        </button>
+
+        <button class="category-button" data-category="maharashtra">
+            🎡 MAHARASHTRA
+        </button>
+
+        <button class="category-button" data-category="delhi">
+            🗼 DELHI
+        </button>
+
+        <button class="category-button" data-category="world">
+            🌍 WORLD
+        </button>
+
+        <button class="category-button" data-category="ai">
+            🤖 AI
+        </button>
+
+        <button class="category-button" data-category="technology">
+            💻 TECHNOLOGY
+        </button>
+
+        <button class="category-button" data-category="business">
+            💰 BUSINESS
+        </button>
+
+        <button class="category-button" data-category="stocks">
+            📈 STOCKS
+        </button>
+
+        <button class="category-button" data-category="startups">
+            🚀 STARTUPS
+        </button>
+
+        <button class="category-button" data-category="weather">
+            🌤️ WEATHER
+        </button>
+
+        <button class="category-button" data-category="sports">
+            🏆 SPORTS
+        </button>
+
+        <button class="category-button" data-category="entertainment">
+            🎬 ENTERTAINMENT
+        </button>
+
+        <button class="category-button" data-category="jobs">
+            💼 JOBS
+        </button>
+
+        <button class="category-button" data-category="saved">
+            🔖 SAVED
+        </button>
+
+    </div>
+
+</nav>    <!-- =========================
+         SEARCH
+    ========================== -->
+
+    <section class="search-section">
+
+        <div class="search-container">
+
+            <input
+                id="search-input"
+                type="text"
+                placeholder="Search news..."
+                autocomplete="off"
+            >
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =========================
+         LATEST & HOT HEADLINES
+    ========================== -->
+
+    <section class="headline-ticker-section">
+
+        <div class="headline-ticker">
+
+            <div class="headline-ticker-label">
+                <span class="hot-dot"></span>
+                LATEST & HOT
+            </div>
+
+            <div class="headline-ticker-window">
+
+                <div
+                    id="headline-ticker-track"
+                    class="headline-ticker-track"
+                >
+                    <span>
+                        Loading latest headlines...
+                    </span>
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =========================
+         NEWS CONTAINER
+         JavaScript will put all
+         articles here.
+    ========================== -->
+
+    <main
+        id="news-container"
+        class="news-container"
+    >
+
+        <div class="loading-message">
+
+            Loading latest news...
+
+        </div>
+
+    </main>
+
+
+    <!-- =========================
+         JAVASCRIPT
+    ========================== -->
+
+    <script src="app.js?v=34"></script>
+
+</body>
+
+</html>

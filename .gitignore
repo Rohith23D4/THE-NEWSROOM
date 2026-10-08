@@ -1,0 +1,51 @@
+# Local Python environments and generated files
+venv/
+**/venv/
+__pycache__/
+*.py[cod]
+
+# Local databases and runtime data
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# Local environment settings and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and operating system files
+.DS_Store
+.idea/
+.vscode/
+
+# Historical copies kept in the working folder
+frontend/*
+!frontend/index.html
+!frontend/app.js
+!frontend/styles.css
+!frontend/saved.html
+!frontend/saved.js
+
+# Keep only runtime backend modules, not archived snapshots or local tools
+backend/*
+!backend/main.py
+!backend/database.py
+!backend/news_service.py
+!backend/ollama_service.py
+!backend/latest_registry.py
+
+*.backup*
+*.bak*
+*.before*
+*_backup.py
+*_backup_*.py
+*_BEFORE_*.py
+*_STAGE*.py
+*_stage*-backup*
+*_stage*_*.js
+*_stage*_*.html
+*_stage*_*.css
+requirements.txtx
