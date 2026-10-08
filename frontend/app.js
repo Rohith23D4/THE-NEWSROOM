@@ -12,6 +12,7 @@ let currentCategory = "latest";
 let currentCategoryCache = {};
 const CATEGORY_CACHE_TTL = 10 * 60 * 1000;
 const CATEGORY_CACHE_STORAGE_PREFIX = "newsroom-category-cache-v1:";
+let hasLoadedInitialCategory = false;
 let categoryLoadSequence = 0;
 const pendingArticleActions = new Set();
 const jobsIntelligencePolls = new Set();
@@ -892,6 +893,8 @@ async function pollJobsIntelligence(statusKey) {
 async function loadNews(category) {
 
     const loadId = ++categoryLoadSequence;
+    const forceFreshRequest = !hasLoadedInitialCategory;
+    hasLoadedInitialCategory = true;
 
     category =
         normalizeCategory(category);
@@ -914,7 +917,7 @@ async function loadNews(category) {
         getFrontendCategoryCache(category);
     const cachedSnapshot = currentCategoryCache[category];
 
-    if (cachedArticles) {
+    if (cachedArticles && !forceFreshRequest) {
 
         allArticles =
             [...cachedArticles];
@@ -944,7 +947,7 @@ async function loadNews(category) {
         return;
     }
 
-    const staleArticles = getFreshStaleCategoryCache(
+    const staleArticles = cachedArticles || getFreshStaleCategoryCache(
         category,
         cachedSnapshot
     );
@@ -972,10 +975,11 @@ async function loadNews(category) {
 
     try {
 
+        const refreshParameter = forceFreshRequest ? "&refresh=1" : "";
         const url =
             `${API_BASE_URL}/news?category=${encodeURIComponent(
                 backendCategory
-            )}`;
+            )}${refreshParameter}`;
 
         const data = await getCategoryData(category, url);
 

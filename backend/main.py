@@ -492,7 +492,7 @@ def categories():
 # ============================================================
 
 @app.get("/news")
-def news(category: str = "Latest"):
+def news(category: str = "Latest", refresh: bool = False):
 
     requested_category = category.strip()
 
@@ -556,21 +556,22 @@ def news(category: str = "Latest"):
         cache_key = f"{search_category}:{india_today}"
         cached_response = None
         now_monotonic = time.monotonic()
-        with CATEGORY_RESPONSE_CACHE_LOCK:
-            cached_entry = CATEGORY_RESPONSE_CACHE.get(cache_key)
-            if (
-                cached_entry
-                and now_monotonic - cached_entry[0]
-                < cached_entry[2]
-            ):
-                cached_response = [
-                    dict(article) for article in cached_entry[1]
-                ]
+        if not refresh:
+            with CATEGORY_RESPONSE_CACHE_LOCK:
+                cached_entry = CATEGORY_RESPONSE_CACHE.get(cache_key)
+                if (
+                    cached_entry
+                    and now_monotonic - cached_entry[0]
+                    < cached_entry[2]
+                ):
+                    cached_response = [
+                        dict(article) for article in cached_entry[1]
+                    ]
 
         articles = (
             cached_response
             if cached_response is not None
-            else get_news(search_category)
+            else get_news(search_category, force_refresh=refresh)
         )[:20]
 
         # Cache only complete, balanced responses. A partial response must

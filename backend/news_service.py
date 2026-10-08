@@ -1707,6 +1707,7 @@ def fetch_new_indian_express_tamil_nadu(
 def fetch_rss(
     feed_url: str,
     timeout: int = REQUEST_TIMEOUT,
+    force_refresh: bool = False,
 ) -> List[dict]:
 
     feed_url = str(
@@ -1730,7 +1731,7 @@ def fetch_rss(
             feed_url
         )
 
-        if cached:
+        if cached and not force_refresh:
 
             cached_at, cached_items = cached
 
@@ -3652,6 +3653,7 @@ def select_partial_balanced(
 
 def get_news(
     category: str = "latest",
+    force_refresh: bool = False,
 ) -> List[dict]:
 
     _debug_request_start = time.perf_counter()
@@ -3991,6 +3993,7 @@ def get_news(
                 executor.submit(
                     fetch_rss,
                     feed,
+                    force_refresh=force_refresh,
                 )
             ] = (
                 index,
