@@ -811,12 +811,26 @@ def is_english_text(*values: str) -> bool:
 # SENTENCE EXTRACTION
 # ============================================================
 
-def split_sentences(text: str) -> List[str]:
+def split_sentences(text: str, latest_mode: bool = False) -> List[str]:
 
     text = clean_text(text)
 
     if not text:
         return []
+
+    # Google and publisher RSS descriptions can include Indian initials or
+    # honorifics in the middle of a sentence (for example, "V.D. Satheesan",
+    # "Edappadi K. Palaniswami", or "Thol. Thirumavalavan"). Protect those
+    # periods for Latest only so the summary builder does not discard a name
+    # fragment as though it were a complete sentence.
+    period_marker = "\uE000"
+    if latest_mode:
+        text = re.sub(
+            r"(?<!\w)(?:[A-Z]\.){1,3}(?=\s+[A-Z])|"
+            r"(?i:\b(?:Thol|Dr|Mr|Ms|Mrs|Smt|Shri)\.)(?=\s+[A-Z])",
+            lambda match: match.group(0).replace(".", period_marker),
+            text,
+        )
 
     # Handle common sentence endings.
     parts = re.split(
@@ -827,6 +841,9 @@ def split_sentences(text: str) -> List[str]:
     results = []
 
     for part in parts:
+
+        if latest_mode:
+            part = part.replace(period_marker, ".")
 
         part = part.strip()
 
@@ -1018,6 +1035,7 @@ def is_bad_sentence(sentence: str) -> bool:
 def build_description(
     title: str,
     candidates: List[str],
+    latest_mode: bool = False,
 ) -> str:
     """
     Build a clear, continuous article description.
@@ -1061,7 +1079,7 @@ def build_description(
         if not candidate:
             continue
 
-        for sentence in split_sentences(candidate):
+        for sentence in split_sentences(candidate, latest_mode=latest_mode):
 
             sentence = clean_text(sentence)
 
@@ -2183,17 +2201,18 @@ def get_publisher_description(
     title: str,
     rss_description: str = "",
     timeout: int = ARTICLE_TIMEOUT,
+    latest_mode: bool = False,
 ) -> str:
 
     raw = fetch_url(url, timeout)
 
     if not raw:
-        return build_description(title, [rss_description])
+        return build_description(title, [rss_description], latest_mode=latest_mode)
 
     try:
         page = raw.decode("utf-8", errors="ignore")
     except Exception:
-        return build_description(title, [rss_description])
+        return build_description(title, [rss_description], latest_mode=latest_mode)
 
     parser = ArticleParser()
 
@@ -2201,7 +2220,7 @@ def get_publisher_description(
         parser.feed(page)
         parser.close()
     except Exception:
-        return build_description(title, [rss_description])
+        return build_description(title, [rss_description], latest_mode=latest_mode)
 
     # Collect genuine article paragraphs.
     #
@@ -2283,10 +2302,11 @@ def get_publisher_description(
         description = build_description(
             title,
             article_paragraphs,
+            latest_mode=latest_mode,
         )
 
         sentence_count = (
-            len(split_sentences(description))
+            len(split_sentences(description, latest_mode=latest_mode))
             if description
             else 0
         )
@@ -2322,10 +2342,11 @@ def get_publisher_description(
     description = build_description(
         title,
         candidates,
+        latest_mode=latest_mode,
     )
 
     sentence_count = (
-        len(split_sentences(description))
+        len(split_sentences(description, latest_mode=latest_mode))
         if description
         else 0
     )
@@ -2637,6 +2658,7 @@ def process_article(
     rss_fallback_mode: bool = False,
     fast_search_mode: bool = False,
     max_age_hours: int = 48,
+    latest_mode: bool = False,
 ) -> Optional[dict]:
 
     title = clean_title(
@@ -2723,8 +2745,13 @@ def process_article(
             title,
             "",
             timeout=4,
+            latest_mode=latest_mode,
         )
-        publisher_copy = build_description(title, [publisher_copy])
+        publisher_copy = build_description(
+            title,
+            [publisher_copy],
+            latest_mode=latest_mode,
+        )
         if (
             not publisher_copy
             or google_news_boilerplate in normalize_text(publisher_copy)
@@ -2804,12 +2831,13 @@ def process_article(
 
     if is_rss_first or (
         fast_search_mode
-        and len(build_description(title, [rss_description])) >= 80
-        and len(build_description(title, [rss_description]).split()) >= 8
+        and len(build_description(title, [rss_description], latest_mode=latest_mode)) >= 80
+        and len(build_description(title, [rss_description], latest_mode=latest_mode).split()) >= 8
     ):
         description = build_description(
             title,
             [rss_description],
+            latest_mode=latest_mode,
         )
     else:
         description = get_publisher_description(
@@ -2817,6 +2845,7 @@ def process_article(
             title,
             rss_description,
             timeout=4 if fast_search_mode else ARTICLE_TIMEOUT,
+            latest_mode=latest_mode,
         )
     # If the RSS feed has no usable description, keep the
          # --------------------------------------------------------
@@ -2840,6 +2869,7 @@ def process_article(
     description = build_description(
         title,
         [description, rss_description],
+        latest_mode=latest_mode,
     )
 
     # A source can return a long but unrelated blurb (for example, a
@@ -2851,7 +2881,7 @@ def process_article(
         and (
         len(description) < 280
         or len(description.split()) < 20
-        or len(split_sentences(description)) < 2
+        or len(split_sentences(description, latest_mode=latest_mode)) < 2
         or (
             not is_active_job_listing(item)
             and not description_matches_title(title, description)
@@ -2862,10 +2892,12 @@ def process_article(
             url,
             title,
             rss_description,
+            latest_mode=latest_mode,
         )
         page_summary = build_description(
             title,
             [page_description],
+            latest_mode=latest_mode,
         )
         if (
             page_summary
@@ -5069,6 +5101,7 @@ def get_news(
                     # expanded from the publisher page when available.
                     category == "jobs",
                     freshness_hours,
+                    latest_mode=(category == "latest"),
                 ): item
                 for item in processing_batch
             }

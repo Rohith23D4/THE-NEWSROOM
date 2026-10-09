@@ -2875,13 +2875,12 @@ function fitRenderedArticleDescriptions(container = newsContainer) {
     if (!container || container.dataset.category !== "latest") return;
 
     const segmentSentences = (text) => {
-        // Treat common Indian-name abbreviations as part of the name.
-        // Intl.Segmenter otherwise sees the period in "Thol." as a
-        // sentence boundary and can drop the rest of "Thol. Thirumavalavan"
-        // when fitting Latest summaries to four lines.
+        // Keep name initials and Indian honorifics inside a sentence.
+        // Sentence segmentation can otherwise stop at periods in names such
+        // as "V.D. Satheesan", "Edappadi K. Palaniswami", or "Thol.".
         const periodMarker = "\uE000";
         const protectedText = String(text || "").replace(
-            /\b(?:Thol|M\.A)\./gi,
+            /\b(?:[A-Z]\.|Thol\.|Dr\.|Mr\.|Ms\.|Mrs\.|Smt\.|Shri\.)/gi,
             abbreviation => abbreviation.replace(/\./g, periodMarker)
         );
 

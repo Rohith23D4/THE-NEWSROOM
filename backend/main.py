@@ -575,6 +575,7 @@ def news(category: str = "Latest", refresh: bool = False):
                         str(article.get("title", "") or ""),
                         "",
                         timeout=5,
+                        latest_mode=True,
                     )
                     summary_key = normalized_description(summary)
                     if (
