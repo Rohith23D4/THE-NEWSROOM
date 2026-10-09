@@ -11428,3 +11428,23 @@ html.dark-mode .google-signin-fallback:hover { background: #26354b; }
 html.dark-mode .auth-divider { color: #d7c8bc; }
 html.dark-mode .auth-divider::before,
 html.dark-mode .auth-divider::after { background: #725b4b; }
+
+/* Keep the category strip pinned while reading on mobile Safari and Chrome. */
+@media (max-width: 767px) {
+    body > nav.category-navigation {
+        position: -webkit-sticky !important;
+        position: sticky !important;
+        top: 0 !important;
+        z-index: 10000 !important;
+        overflow: visible !important;
+        isolation: isolate;
+        box-shadow: 0 5px 16px rgba(23, 16, 14, 0.28) !important;
+    }
+
+    body > nav.category-navigation .category-container {
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+}
