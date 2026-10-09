@@ -11432,6 +11432,8 @@ html.dark-mode .auth-divider::after { background: #725b4b; }
 /* Latest cards show two to four lines of description without changing other sections. */
 #news-container[data-category="latest"] .news-card .article-description {
     display: -webkit-box !important;
+    width: 100% !important;
+    max-width: 68ch !important;
     min-height: calc(1.55em * 2) !important;
     max-height: calc(1.55em * 4) !important;
     overflow: hidden !important;
