@@ -5108,9 +5108,9 @@ def get_news(
                     process_article,
                     item,
                     rss_fallback_mode,
-                    # Keep the Jobs page lightweight. Latest uses the normal
-                    # summary-quality pass so short RSS snippets can be
-                    # expanded from the publisher page when available.
+                    # Keep Jobs and Latest lightweight. Latest retries
+                    # publisher extraction only when text suggests a cutoff
+                    # after a name initial or honorific.
                     category in {"jobs", "latest"},
                     freshness_hours,
                     latest_mode=(category == "latest"),
