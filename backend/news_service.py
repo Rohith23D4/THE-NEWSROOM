@@ -2876,9 +2876,20 @@ def process_article(
     # live-update headline paired with a different story's summary).
     # Enrich weak or mismatched RSS text from the article page, then
     # reject the item if the page still cannot provide a related summary.
+    latest_initial_cutoff = latest_mode and bool(
+        re.search(
+            r"(?<!\w)(?:[A-Z]\.){1,3}\s+"
+            r"(?:He|She|The|With|And|But|His|Her|It|They|This|That|Before|After)\b",
+            description,
+            flags=re.IGNORECASE,
+        )
+    )
+
     if (
-        not fast_search_mode
+        (not fast_search_mode or latest_initial_cutoff)
         and (
+        latest_initial_cutoff
+        or
         len(description) < 280
         or len(description.split()) < 20
         or len(split_sentences(description, latest_mode=latest_mode)) < 2
@@ -2892,6 +2903,7 @@ def process_article(
             url,
             title,
             rss_description,
+            timeout=4 if fast_search_mode else ARTICLE_TIMEOUT,
             latest_mode=latest_mode,
         )
         page_summary = build_description(
@@ -5099,7 +5111,7 @@ def get_news(
                     # Keep the Jobs page lightweight. Latest uses the normal
                     # summary-quality pass so short RSS snippets can be
                     # expanded from the publisher page when available.
-                    category == "jobs",
+                    category in {"jobs", "latest"},
                     freshness_hours,
                     latest_mode=(category == "latest"),
                 ): item
