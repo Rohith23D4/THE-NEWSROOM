@@ -2703,6 +2703,37 @@ def process_article(
         or ""
     ).strip()
 
+    # Google News sometimes supplies its own site-wide tagline as the
+    # article description. It passes length checks but is not story copy.
+    # For those entries only, resolve the publisher URL and extract a real
+    # source description; omit the card if the publisher copy is unavailable.
+    google_news_boilerplate = (
+        "comprehensive up to date news coverage aggregated from sources "
+        "all over the world by google news"
+    )
+    if google_news_boilerplate in normalize_text(rss_description):
+        if "news.google.com" in url.lower():
+            resolved_urls = resolve_google_news_urls([url], timeout=4)
+            url = resolved_urls[0] if resolved_urls else ""
+        if not url:
+            return None
+
+        publisher_copy = get_publisher_description(
+            url,
+            title,
+            "",
+            timeout=4,
+        )
+        publisher_copy = build_description(title, [publisher_copy])
+        if (
+            not publisher_copy
+            or google_news_boilerplate in normalize_text(publisher_copy)
+            or len(publisher_copy) < 80
+            or len(publisher_copy.split()) < 8
+        ):
+            return None
+        rss_description = publisher_copy
+
     # ========================================================
     # RSS-FIRST FOR PUBLISHERS THAT RESTRICT ARTICLE PAGES
     # ========================================================
