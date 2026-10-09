@@ -424,55 +424,12 @@ def home():
 # ============================================================
 
 @app.get("/health")
-def health():
-    database_status = "healthy"
-    ollama_status = "healthy"
-
-    # Check SQLite
-    try:
-        connection = get_connection()
-        connection.execute("SELECT 1")
-        connection.close()
-    except Exception as error:
-        database_status = "unhealthy"
-        print("HEALTH DATABASE ERROR:", error)
-
-    # Check Ollama
-    try:
-        import requests
-
-        ollama_health_url = "http://127.0.0.1:11434/api/tags"
-
-        response = requests.get(
-            ollama_health_url,
-            timeout=1.5
-        )
-
-        if response.status_code != 200:
-            ollama_status = "unhealthy"
-
-    except Exception as error:
-        ollama_status = "unhealthy"
-        print("HEALTH OLLAMA ERROR:", error)
-
-    overall_status = (
-        "healthy"
-        if database_status == "healthy"
-        and ollama_status == "healthy"
-        else "degraded"
-    )
-
+async def health():
+    # Render uses this endpoint as a liveness probe. Keep it independent of
+    # SQLite and Ollama so it stays responsive while news requests are busy.
     return {
-        "status": overall_status,
+        "status": "healthy",
         "service": "Local Newsroom",
-        "ai": {
-            "service": "Ollama",
-            "status": ollama_status,
-        },
-        "database": {
-            "service": "SQLite",
-            "status": database_status,
-        },
     }
 
 
