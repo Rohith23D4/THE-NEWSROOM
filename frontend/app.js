@@ -2875,13 +2875,27 @@ function fitRenderedArticleDescriptions(container = newsContainer) {
     if (!container || container.dataset.category !== "latest") return;
 
     const segmentSentences = (text) => {
+        // Treat common Indian-name abbreviations as part of the name.
+        // Intl.Segmenter otherwise sees the period in "Thol." as a
+        // sentence boundary and can drop the rest of "Thol. Thirumavalavan"
+        // when fitting Latest summaries to four lines.
+        const periodMarker = "\uE000";
+        const protectedText = String(text || "").replace(
+            /\b(?:Thol|M\.A)\./gi,
+            abbreviation => abbreviation.replace(/\./g, periodMarker)
+        );
+
+        let segments;
         if (window.Intl?.Segmenter) {
             const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
-            return Array.from(segmenter.segment(text), part => part.segment.trim()).filter(Boolean);
+            segments = Array.from(segmenter.segment(protectedText), part => part.segment.trim());
+        } else {
+            segments = (protectedText.match(/[^.!?]+[.!?]+(?:["'’”)]*)?(?:\s+|$)/g) || [])
+                .map(sentence => sentence.trim());
         }
 
-        return (text.match(/[^.!?]+[.!?]+(?:["'’”)]*)?(?:\s+|$)/g) || [])
-            .map(sentence => sentence.trim())
+        return segments
+            .map(sentence => sentence.replaceAll(periodMarker, ".").trim())
             .filter(Boolean);
     };
 
