@@ -21,6 +21,7 @@ from news_service import (
     LATEST_HOT_FEEDS,
     get_publisher_description,
     description_matches_title,
+    resolve_google_news_urls,
 )
 from ollama_service import (
     summarize_news,
@@ -530,6 +531,86 @@ def news(category: str = "Latest", refresh: bool = False):
             if cached_response is not None
             else get_news(search_category, force_refresh=refresh)
         )[:20]
+
+        # Google News can return a generic site tagline instead of an article
+        # summary. Replace those placeholders on Latest with publisher copy;
+        # if the publisher page has no real summary, omit that card rather than
+        # displaying the same generic text as if it described every story.
+        if search_category == "latest":
+            placeholder = (
+                "comprehensive up to date news coverage aggregated from "
+                "sources all over the world by google news"
+            )
+
+            def normalized_description(value):
+                return re.sub(
+                    r"[^a-z0-9]+",
+                    " ",
+                    str(value or "").lower(),
+                ).strip()
+
+            placeholder_indexes = [
+                index
+                for index, article in enumerate(articles)
+                if placeholder in normalized_description(article.get("description", ""))
+            ]
+
+            if placeholder_indexes:
+                original_urls = [
+                    str(articles[index].get("url", "") or "").strip()
+                    for index in placeholder_indexes
+                ]
+                resolved_urls = resolve_google_news_urls(original_urls, timeout=5)
+                replacements = {}
+                from concurrent.futures import ThreadPoolExecutor
+
+                def extract_placeholder_summary(task):
+                    index, article, resolved_url = task
+                    article_url = str(article.get("url", "") or "").strip()
+                    publisher_url = resolved_url or article_url
+                    if "news.google.com" in publisher_url.lower():
+                        return index, None
+                    summary = get_publisher_description(
+                        publisher_url,
+                        str(article.get("title", "") or ""),
+                        "",
+                        timeout=5,
+                    )
+                    summary_key = normalized_description(summary)
+                    if (
+                        not summary
+                        or placeholder in summary_key
+                        or len(summary) < 120
+                        or len(summary.split()) < 12
+                    ):
+                        return index, None
+                    return index, (publisher_url, summary)
+
+                tasks = [
+                    (
+                        index,
+                        articles[index],
+                        resolved_urls[position] if position < len(resolved_urls) else "",
+                    )
+                    for position, index in enumerate(placeholder_indexes)
+                ]
+                with ThreadPoolExecutor(max_workers=min(8, len(tasks))) as executor:
+                    for index, replacement in executor.map(extract_placeholder_summary, tasks):
+                        if replacement:
+                            replacements[index] = replacement
+
+                clean_articles = []
+                for index, article in enumerate(articles):
+                    if index in placeholder_indexes:
+                        replacement = replacements.get(index)
+                        if not replacement:
+                            continue
+                        publisher_url, summary = replacement
+                        article = dict(article)
+                        article["url"] = publisher_url
+                        article["description"] = summary
+                    clean_articles.append(article)
+                articles = clean_articles
 
         # Cache only complete, balanced responses. A partial response must
         # not become the category's short-term answer on the next visit.
