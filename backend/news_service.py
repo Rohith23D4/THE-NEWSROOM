@@ -2885,11 +2885,20 @@ def process_article(
             flags=re.IGNORECASE,
         )
     )
+    # Latest RSS feeds often publish a short teaser instead of an article
+    # summary. Try the publisher page for those short cards so Latest can show
+    # the same useful amount of source text as the regional categories.
+    latest_short_teaser = latest_mode and (
+        len(description) < 360
+        or len(description.split()) < 45
+        or bool(re.search(r"(?:\.{2,}|…)+\s*[\"'’”)]*$", description))
+    )
 
     if (
-        (not fast_search_mode or latest_initial_cutoff)
+        (not fast_search_mode or latest_initial_cutoff or latest_short_teaser)
         and (
         latest_initial_cutoff
+        or latest_short_teaser
         or
         len(description) < 280
         or len(description.split()) < 20
@@ -2904,7 +2913,7 @@ def process_article(
             url,
             title,
             rss_description,
-            timeout=4 if fast_search_mode else ARTICLE_TIMEOUT,
+            timeout=2 if fast_search_mode else ARTICLE_TIMEOUT,
             latest_mode=latest_mode,
         )
         page_summary = build_description(
