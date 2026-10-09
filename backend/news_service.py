@@ -136,6 +136,9 @@ LATEST_HOT_FEEDS = [
 
 CATEGORY_FEEDS = {
     "latest": [
+        # A rolling Google News search supplements publisher RSS feeds that
+        # sometimes stop advancing or lag behind on Render.
+        "https://news.google.com/rss/search?q=India+news+OR+India+breaking+news+when%3A1d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://indianexpress.com/section/india/feed/",
         "https://feeds.feedburner.com/ndtvnews-latest",
         "https://www.hindustantimes.com/feeds/rss/latest/rssfeed.xml",
@@ -1778,7 +1781,7 @@ def fetch_rss(
                 feed_url
             )
 
-            if cached:
+            if cached and not force_refresh:
 
                 print(
                     f"RSS STALE CACHE FALLBACK: {feed_url}"
@@ -1811,7 +1814,7 @@ def fetch_rss(
                 feed_url
             )
 
-            if cached:
+            if cached and not force_refresh:
 
                 print(
                     f"RSS STALE CACHE FALLBACK: {feed_url}"

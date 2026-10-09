@@ -14,6 +14,8 @@ const CATEGORY_CACHE_TTL = 10 * 60 * 1000;
 const CATEGORY_CACHE_STORAGE_PREFIX = "newsroom-category-cache-v1:";
 let hasLoadedInitialCategory = false;
 let categoryLoadSequence = 0;
+let lastObservedIndiaDate = indiaCalendarDate(new Date());
+let freshCategoryRequestSequence = 0;
 const pendingArticleActions = new Set();
 const jobsIntelligencePolls = new Set();
 
@@ -626,7 +628,7 @@ async function autoRefreshCurrentCategory() {
         const url =
             `${API_BASE_URL}/news?category=${encodeURIComponent(
                 backendCategory
-            )}`;
+            )}&refresh=1`;
 
         const data = await getCategoryData(
             categoryAtStart,
@@ -698,13 +700,7 @@ async function autoRefreshCurrentCategory() {
 
             });
 
-        allArticles = mergeUniqueArticles(
-            uniqueArticles.slice(0, 20),
-            getFreshStaleCategoryCache(
-                categoryAtStart,
-                currentCategoryCache[categoryAtStart]
-            ) || []
-        );
+        allArticles = uniqueArticles.slice(0, 20);
 
         currentDisplayedArticles =
             [...allArticles];
@@ -763,6 +759,41 @@ function startAutoRefresh() {
 }
 
 startAutoRefresh();
+
+function refreshAfterIndiaDateChange() {
+    const currentIndiaDate = indiaCalendarDate(new Date());
+    if (!currentIndiaDate || currentIndiaDate === lastObservedIndiaDate) {
+        return;
+    }
+
+    lastObservedIndiaDate = currentIndiaDate;
+
+    // A new India calendar day invalidates browser snapshots for all news
+    // categories, so a category opened later cannot reuse yesterday's set.
+    Object.keys(CATEGORY_MAP).forEach(function (category) {
+        delete currentCategoryCache[category];
+        try {
+            localStorage.removeItem(CATEGORY_CACHE_STORAGE_PREFIX + category);
+        } catch (error) {
+            // The live request still bypasses local storage when unavailable.
+        }
+    });
+
+    console.info("India date changed; requesting fresh news:", currentIndiaDate);
+    if (currentCategory !== "saved") {
+        loadNews(currentCategory, true);
+    }
+}
+
+// Check often enough to catch midnight, and check again when a suspended tab
+// becomes visible or active so background timer throttling cannot miss it.
+window.setInterval(refreshAfterIndiaDateChange, 30 * 1000);
+window.addEventListener("focus", refreshAfterIndiaDateChange);
+document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") {
+        refreshAfterIndiaDateChange();
+    }
+});
 
 
 // ============================================================
@@ -834,8 +865,12 @@ async function prefetchCategory(category) {
     }
 }
 
-function getCategoryData(category, url) {
-    if (!categoryRequestsInFlight[category]) {
+function getCategoryData(category, url, forceFresh = false) {
+    const requestKey = forceFresh
+        ? `${category}:fresh:${++freshCategoryRequestSequence}`
+        : category;
+
+    if (!categoryRequestsInFlight[requestKey]) {
         const requestPromise = fetch(url, {
             method: "GET",
             cache: "no-store"
@@ -848,16 +883,16 @@ function getCategoryData(category, url) {
             return response.json();
         });
 
-        categoryRequestsInFlight[category] = requestPromise;
+        categoryRequestsInFlight[requestKey] = requestPromise;
         const clearRequest = function() {
-            if (categoryRequestsInFlight[category] === requestPromise) {
-                delete categoryRequestsInFlight[category];
+            if (categoryRequestsInFlight[requestKey] === requestPromise) {
+                delete categoryRequestsInFlight[requestKey];
             }
         };
         requestPromise.then(clearRequest, clearRequest);
     }
 
-    return categoryRequestsInFlight[category];
+    return categoryRequestsInFlight[requestKey];
 }
 
 async function pollJobsIntelligence(statusKey) {
@@ -890,10 +925,10 @@ async function pollJobsIntelligence(statusKey) {
     }
 }
 
-async function loadNews(category) {
+async function loadNews(category, forceFresh = false) {
 
     const loadId = ++categoryLoadSequence;
-    const forceFreshRequest = !hasLoadedInitialCategory;
+    const forceFreshRequest = forceFresh || !hasLoadedInitialCategory;
     hasLoadedInitialCategory = true;
 
     category =
@@ -947,10 +982,11 @@ async function loadNews(category) {
         return;
     }
 
-    const staleArticles = cachedArticles || getFreshStaleCategoryCache(
-        category,
-        cachedSnapshot
-    );
+    // A full-page load must show only the result of its forced live request.
+    // Otherwise an old browser snapshot can make the refresh look ineffective.
+    const staleArticles = forceFreshRequest
+        ? null
+        : cachedArticles || getFreshStaleCategoryCache(category, cachedSnapshot);
     const showingStaleCache = Boolean(staleArticles);
 
     if (showingStaleCache) {
@@ -981,7 +1017,7 @@ async function loadNews(category) {
                 backendCategory
             )}${refreshParameter}`;
 
-        const data = await getCategoryData(category, url);
+        const data = await getCategoryData(category, url, forceFreshRequest);
 
         if (
             loadId !== categoryLoadSequence ||
@@ -1022,10 +1058,12 @@ async function loadNews(category) {
                 };
             });
 
-        allArticles = mergeUniqueArticles(
-            freshArticles,
-            getFreshStaleCategoryCache(category, cachedSnapshot) || []
-        );
+        allArticles = forceFreshRequest
+            ? freshArticles
+            : mergeUniqueArticles(
+                freshArticles,
+                getFreshStaleCategoryCache(category, cachedSnapshot) || []
+            );
 
         if (category === "weather" && !isCompleteWeatherCache(allArticles)) {
             allArticles = freshArticles;
