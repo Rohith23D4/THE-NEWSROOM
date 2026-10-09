@@ -11433,12 +11433,13 @@ html.dark-mode .auth-divider::after { background: #725b4b; }
 #news-container[data-category="latest"] .news-card .article-description {
     display: -webkit-box !important;
     width: 100% !important;
-    max-width: 68ch !important;
+    max-width: 76ch !important;
     min-height: calc(1.55em * 2) !important;
-    max-height: calc(1.55em * 4) !important;
+    max-height: none !important;
     overflow: hidden !important;
     line-height: 1.55 !important;
     text-overflow: ellipsis !important;
+    text-wrap: pretty !important;
     -webkit-box-orient: vertical !important;
     -webkit-line-clamp: 4 !important;
 }

@@ -2870,9 +2870,61 @@ function cleanArticleDescription(description) {
     return value;
 }
 
-// Descriptions keep their full publisher text and wrap naturally in the card.
-function fitRenderedArticleDescriptions() {
-    // Kept as a no-op for existing render and resize call sites.
+// Keep Latest summaries within four visual lines without ending mid-sentence.
+function fitRenderedArticleDescriptions(container = newsContainer) {
+    if (!container || container.dataset.category !== "latest") return;
+
+    const segmentSentences = (text) => {
+        if (window.Intl?.Segmenter) {
+            const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
+            return Array.from(segmenter.segment(text), part => part.segment.trim()).filter(Boolean);
+        }
+
+        return (text.match(/[^.!?]+[.!?]+(?:["'’”)]*)?(?:\s+|$)/g) || [])
+            .map(sentence => sentence.trim())
+            .filter(Boolean);
+    };
+
+    for (const paragraph of container.querySelectorAll(".news-card .article-description")) {
+        const fullText = paragraph.dataset.fullDescription || paragraph.textContent.trim();
+        const previousFit = paragraph.dataset.latestFittedDescription;
+        const currentText = paragraph.textContent.trim();
+
+        // Leave translated or otherwise edited descriptions alone on resize.
+        if (previousFit && currentText !== previousFit && currentText !== fullText) continue;
+
+        const sentences = segmentSentences(fullText).filter(sentence =>
+            /[.!?]["'’”)]*$/.test(sentence) && !/(?:\.{2,}|…)["'’”)]*$/.test(sentence)
+        );
+        if (!sentences.length) continue;
+
+        const savedStyle = paragraph.getAttribute("style");
+        paragraph.style.setProperty("display", "block", "important");
+        paragraph.style.setProperty("-webkit-line-clamp", "unset", "important");
+        paragraph.style.setProperty("max-height", "none", "important");
+        paragraph.style.setProperty("overflow", "visible", "important");
+
+        const lineCount = (text) => {
+            paragraph.textContent = text;
+            const range = document.createRange();
+            range.selectNodeContents(paragraph);
+            const tops = new Set(Array.from(range.getClientRects(), rect => Math.round(rect.top)));
+            return tops.size;
+        };
+
+        let fittedText = "";
+        let candidate = "";
+        for (const sentence of sentences) {
+            candidate = candidate ? `${candidate} ${sentence}` : sentence;
+            if (lineCount(candidate) <= 4) fittedText = candidate;
+            else break;
+        }
+
+        paragraph.textContent = fittedText || fullText;
+        paragraph.dataset.latestFittedDescription = paragraph.textContent.trim();
+        if (savedStyle === null) paragraph.removeAttribute("style");
+        else paragraph.setAttribute("style", savedStyle);
+    }
 }
 
 let articleDescriptionResizeTimer;
