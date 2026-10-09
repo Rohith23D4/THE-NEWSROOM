@@ -5064,12 +5064,10 @@ def get_news(
                     process_article,
                     item,
                     rss_fallback_mode,
-                    # Latest is the landing page, so it must return within
-                    # Render's proxy window on a cold start. RSS already
-                    # contains publisher-supplied summaries; use the same
-                    # lightweight validation used for search rather than
-                    # opening dozens of publisher pages for enrichment.
-                    category in {"jobs", "latest"},
+                    # Keep the Jobs page lightweight. Latest uses the normal
+                    # summary-quality pass so short RSS snippets can be
+                    # expanded from the publisher page when available.
+                    category == "jobs",
                     freshness_hours,
                 ): item
                 for item in processing_batch
