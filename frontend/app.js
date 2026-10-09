@@ -935,6 +935,7 @@ async function loadNews(category, forceFresh = false) {
         normalizeCategory(category);
 
     if (category === "saved") {
+        newsContainer.dataset.category = "saved";
         loadSavedArticles();
         return;
     }
@@ -944,6 +945,7 @@ async function loadNews(category, forceFresh = false) {
     }
 
     currentCategory = category;
+    newsContainer.dataset.category = category;
 
     updateActiveCategory(category);
 
