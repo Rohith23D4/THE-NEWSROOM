@@ -2880,7 +2880,7 @@ function fitRenderedArticleDescriptions(container = newsContainer) {
         // as "V.D. Satheesan", "Edappadi K. Palaniswami", or "Thol.".
         const periodMarker = "\uE000";
         const protectedText = String(text || "").replace(
-            /\b(?:[A-Z]\.|Thol\.|Dr\.|Mr\.|Ms\.|Mrs\.|Smt\.|Shri\.)/gi,
+            /\b(?!(?:U\.S\.|U\.K\.|U\.N\.|E\.U\.|U\.A\.E\.))(?:(?:[A-Z]\.){1,3}|Thol\.|Dr\.|Mr\.|Ms\.|Mrs\.|Smt\.|Shri\.)/gi,
             abbreviation => abbreviation.replace(/\./g, periodMarker)
         );
 

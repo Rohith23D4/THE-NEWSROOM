@@ -2878,8 +2878,9 @@ def process_article(
     # reject the item if the page still cannot provide a related summary.
     latest_initial_cutoff = latest_mode and bool(
         re.search(
-            r"(?<!\w)(?:[A-Z]\.){1,3}\s+"
-            r"(?:He|She|The|With|And|But|His|Her|It|They|This|That|Before|After)\b",
+            r"(?<!U\.)(?<!E\.)(?<!\w)[A-Z]\.\s+"
+            r"(?:He|She|The|With|And|But|His|Her|It|They|This|That|Before|After)\b"
+            r"|\bThol\.\s+(?:He|She|The|With|And|But|His|Her|It|They|This|That|Before|After)\b",
             description,
             flags=re.IGNORECASE,
         )
@@ -10284,14 +10285,12 @@ def search_news(
         # Remove obvious duplicated text.
         # ----------------------------------------------------
 
-        sentences = [
-            s.strip()
-            for s in re.split(
-                r"(?<=[.!?])\s+",
-                description,
-            )
-            if s.strip()
-        ]
+        sentence_parts = (
+            split_sentences(description, latest_mode=True)
+            if category == "latest"
+            else re.split(r"(?<=[.!?])\s+", description)
+        )
+        sentences = [s.strip() for s in sentence_parts if s.strip()]
 
         cleaned = []
 
@@ -10347,7 +10346,7 @@ def search_news(
 
         MIN_CHARS = 120 if category == "weather" else 320
         MIN_WORDS = 12 if category == "weather" else 20
-        MAX_CHARS = 360
+        MAX_CHARS = 900 if category == "latest" else 360
 
         # If source text is already within the useful range,
         # keep it exactly as source-derived text.
@@ -10367,7 +10366,7 @@ def search_news(
                     :sentence_end + 1
                 ].strip()
 
-            else:
+            elif category != "latest":
                 # If no sentence ends inside the target range,
                 # cut at a word boundary without inventing text.
                 description = (
@@ -10447,7 +10446,12 @@ def search_news(
         # Rebuild the card description from complete source sentences only.
         # CSS line clamping can otherwise hide the end of a sentence.
         complete_sentences = []
-        for sentence in re.split(r"(?<=[.!?])\s+", description):
+        sentence_parts = (
+            split_sentences(description, latest_mode=True)
+            if category == "latest"
+            else re.split(r"(?<=[.!?])\s+", description)
+        )
+        for sentence in sentence_parts:
             sentence = sentence.strip()
             if (
                 not sentence
@@ -10455,10 +10459,11 @@ def search_news(
                 or not re.search(r"[.!?][\"'’”)]*$", sentence)
             ):
                 continue
-            if len(sentence) > 360:
+            sentence_limit = 500 if category == "latest" else 360
+            if len(sentence) > sentence_limit:
                 continue
             candidate = " ".join(complete_sentences + [sentence])
-            if len(candidate) > 360:
+            if len(candidate) > MAX_CHARS:
                 break
             complete_sentences.append(sentence)
 
