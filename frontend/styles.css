@@ -11431,17 +11431,16 @@ html.dark-mode .auth-divider::after { background: #725b4b; }
 
 /* Latest cards show two to four lines of description without changing other sections. */
 #news-container[data-category="latest"] .news-card .article-description {
-    display: -webkit-box !important;
+    display: block !important;
     width: 100% !important;
     max-width: 76ch !important;
     min-height: calc(1.55em * 2) !important;
     max-height: none !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     line-height: 1.55 !important;
-    text-overflow: ellipsis !important;
+    text-overflow: clip !important;
     text-wrap: pretty !important;
-    -webkit-box-orient: vertical !important;
-    -webkit-line-clamp: 4 !important;
+    -webkit-line-clamp: unset !important;
 }
 
 /* Keep the category strip pinned while reading on mobile Safari and Chrome. */
