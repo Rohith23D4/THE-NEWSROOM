@@ -11433,7 +11433,7 @@ html.dark-mode .auth-divider::after { background: #725b4b; }
 #news-container[data-category="latest"] .news-card .article-description {
     display: block !important;
     width: 100% !important;
-    max-width: 76ch !important;
+    max-width: none !important;
     min-height: calc(1.55em * 2) !important;
     max-height: none !important;
     overflow: visible !important;
@@ -11441,6 +11441,8 @@ html.dark-mode .auth-divider::after { background: #725b4b; }
     text-overflow: clip !important;
     text-wrap: pretty !important;
     -webkit-line-clamp: unset !important;
+    box-sizing: border-box !important;
+    margin-right: auto !important;
 }
 
 /* Keep the category strip pinned while reading on mobile Safari and Chrome. */
