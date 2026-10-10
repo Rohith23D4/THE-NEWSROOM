@@ -11,7 +11,9 @@ let currentCategory = "latest";
 
 let currentCategoryCache = {};
 const CATEGORY_CACHE_TTL = 10 * 60 * 1000;
-const CATEGORY_CACHE_STORAGE_PREFIX = "newsroom-category-cache-v1:";
+// v3 invalidates snapshots created before every category required a balanced
+// 20-article set from four to six publishers.
+const CATEGORY_CACHE_STORAGE_PREFIX = "newsroom-category-cache-v3:";
 let hasLoadedInitialCategory = false;
 let categoryLoadSequence = 0;
 let lastObservedIndiaDate = indiaCalendarDate(new Date());
@@ -49,6 +51,11 @@ function allArticlesAreCurrent(articles) {
         articles.every((article) => isWithinThreeIndiaCalendarDays(article.published_at));
 }
 
+function hasFullLatestDescription(article) {
+    const description = String(article?.description || "").trim();
+    return description.length >= 320 && description.split(/\s+/).length >= 20;
+}
+
 function getFrontendCategoryCache(category) {
 
     let cached = currentCategoryCache[category];
@@ -78,6 +85,29 @@ function getFrontendCategoryCache(category) {
         return null;
     }
 
+    if (category === "jobs" && cached.jobsScopeVersion !== 1) {
+        delete currentCategoryCache[category];
+        try {
+            localStorage.removeItem(CATEGORY_CACHE_STORAGE_PREFIX + category);
+        } catch (error) {
+            // Ignore unavailable browser storage.
+        }
+        return null;
+    }
+
+    // Never reuse a short Latest teaser from browser storage. The API applies
+    // the same rule, and this protects category switches and older snapshots.
+    if (category === "latest" &&
+        (!Array.isArray(cached.articles) || !cached.articles.every(hasFullLatestDescription))) {
+        delete currentCategoryCache[category];
+        try {
+            localStorage.removeItem(CATEGORY_CACHE_STORAGE_PREFIX + category);
+        } catch (error) {
+            // Keep the page usable when browser storage is unavailable.
+        }
+        return null;
+    }
+
     if (
         Date.now() - cached.timestamp
         > CATEGORY_CACHE_TTL
@@ -85,20 +115,8 @@ function getFrontendCategoryCache(category) {
         return null;
     }
 
-    // Keep partial or single-source responses out of the category cache.
-    if (!isCompleteCategorySet(cached.articles) || !allArticlesAreCurrent(cached.articles)) {
-        delete currentCategoryCache[category];
-        try {
-            localStorage.removeItem(CATEGORY_CACHE_STORAGE_PREFIX + category);
-        } catch (error) {
-            // Keep the in-memory cache usable when browser storage is unavailable.
-        }
-        return null;
-    }
-
-    // A partial Weather response must not remain on screen from the five
-    // minute browser cache. Let the backend retry its refreshed source set.
-    if (category === "weather" && !isCompleteWeatherCache(cached.articles)) {
+    // Reuse only a complete, publisher-balanced response for every category.
+    if (!isCompleteCategorySet(cached.articles, category) || !allArticlesAreCurrent(cached.articles)) {
         delete currentCategoryCache[category];
         try {
             localStorage.removeItem(CATEGORY_CACHE_STORAGE_PREFIX + category);
@@ -111,16 +129,9 @@ function getFrontendCategoryCache(category) {
     return cached.articles;
 }
 
-function isCompleteWeatherCache(articles) {
+function isCompleteCategorySet(articles, category) {
     if (!Array.isArray(articles) || articles.length !== 20) return false;
-    const sources = new Set(
-        articles.map((article) => String(article.source || "").trim()).filter(Boolean)
-    );
-    return sources.size >= 4 && sources.size <= 6;
-}
 
-function isCompleteCategorySet(articles) {
-    if (!Array.isArray(articles) || articles.length !== 20) return false;
     const sources = new Set(
         articles.map((article) => String(article.source || "").trim()).filter(Boolean)
     );
@@ -138,7 +149,7 @@ function mergeUniqueArticles(primary = [], fallback = []) {
         const key = url || title;
         const source = String(article.source || "Unknown source").trim();
         if (!sourceCounts.has(source) && sourceCounts.size >= 6) continue;
-        if ((sourceCounts.get(source) || 0) >= 8) continue;
+        if ((sourceCounts.get(source) || 0) >= 6) continue;
         if (!key || seen.has(key)) continue;
         seen.add(key);
         merged.push(article);
@@ -172,8 +183,7 @@ function saveFrontendCategoryCache(
     category,
     articles
 ) {
-    if (!isCompleteCategorySet(articles) || !allArticlesAreCurrent(articles) ||
-        (category === "weather" && !isCompleteWeatherCache(articles))) {
+    if (!isCompleteCategorySet(articles, category) || !allArticlesAreCurrent(articles)) {
         delete currentCategoryCache[category];
         try {
             localStorage.removeItem(CATEGORY_CACHE_STORAGE_PREFIX + category);
@@ -183,19 +193,30 @@ function saveFrontendCategoryCache(
         return;
     }
 
-    currentCategoryCache[category] = {
+    const cacheEntry = {
         timestamp: Date.now(),
-        articles: [...articles]
+        articles: [...articles],
+        ...(category === "jobs" ? { jobsScopeVersion: 1 } : {})
+    };
+    currentCategoryCache[category] = cacheEntry;
+
+    const persistCache = function () {
+        if (currentCategoryCache[category] !== cacheEntry) return;
+        try {
+            localStorage.setItem(
+                CATEGORY_CACHE_STORAGE_PREFIX + category,
+                JSON.stringify(cacheEntry)
+            );
+        } catch (error) {
+            // The in-memory cache still works if storage is full or blocked.
+            console.debug("Category cache could not be saved:", category, error);
+        }
     };
 
-    try {
-        localStorage.setItem(
-            CATEGORY_CACHE_STORAGE_PREFIX + category,
-            JSON.stringify(currentCategoryCache[category])
-        );
-    } catch (error) {
-        // The five-minute in-memory cache still works if storage is full/blocked.
-        console.debug("Category cache could not be saved:", category, error);
+    if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(persistCache, { timeout: 1200 });
+    } else {
+        window.setTimeout(persistCache, 0);
     }
 }
 
@@ -299,9 +320,7 @@ function setupCategoryNavigation() {
 
     categoryElements.forEach(function (element) {
 
-        // Start warming the feed as soon as the category is approached.
-        // pointerdown covers quick clicks and touch; getCategoryData deduplicates
-        // this with the request loadNews starts immediately after the click.
+        let hoverPrefetchTimer = null;
         const warmCategory = function () {
             const candidate = normalizeCategory(
                 element.dataset.category ||
@@ -312,8 +331,18 @@ function setupCategoryNavigation() {
                 prefetchCategory(candidate);
             }
         };
-        element.addEventListener("pointerenter", warmCategory, { passive: true });
-        element.addEventListener("pointerdown", warmCategory, { passive: true });
+        element.addEventListener("pointerenter", function (event) {
+            if (event.pointerType === "touch") return;
+            clearTimeout(hoverPrefetchTimer);
+            hoverPrefetchTimer = setTimeout(warmCategory, 180);
+        }, { passive: true });
+        element.addEventListener("pointerleave", function () {
+            clearTimeout(hoverPrefetchTimer);
+        }, { passive: true });
+        element.addEventListener("pointerdown", function () {
+            clearTimeout(hoverPrefetchTimer);
+            warmCategory();
+        }, { passive: true });
         element.addEventListener("focus", warmCategory);
 
         element.addEventListener("click", function (event) {
@@ -595,6 +624,10 @@ let autoRefreshTimer = null;
 
 async function autoRefreshCurrentCategory() {
 
+    if (document.visibilityState === "hidden") {
+        return;
+    }
+
     // Never start another refresh while one is running.
     if (autoRefreshInProgress) {
         return;
@@ -761,6 +794,8 @@ function startAutoRefresh() {
 startAutoRefresh();
 
 function refreshAfterIndiaDateChange() {
+    if (document.visibilityState === "hidden") return;
+
     const currentIndiaDate = indiaCalendarDate(new Date());
     if (!currentIndiaDate || currentIndiaDate === lastObservedIndiaDate) {
         return;
@@ -792,6 +827,9 @@ window.addEventListener("focus", refreshAfterIndiaDateChange);
 document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") {
         refreshAfterIndiaDateChange();
+        if (typeof updateHeadlineTicker === "function") {
+            updateHeadlineTicker();
+        }
     }
 });
 
@@ -802,34 +840,39 @@ document.addEventListener("visibilitychange", function () {
 
 // STAGE 7 — IN-FLIGHT REQUEST DEDUPLICATION
 const categoryRequestsInFlight = {};
+let categoryWarmupStarted = false;
 
-function scheduleNextCategoryPrefetch(category) {
-    if (category === "jobs" || category === "saved") {
-        return;
-    }
+function scheduleCategoryWarmup() {
+    if (categoryWarmupStarted) return;
+    categoryWarmupStarted = true;
 
-    const navigationCategories = Array.from(
-        document.querySelectorAll("[data-category]")
-    ).map(function (element) {
-        return normalizeCategory(element.dataset.category || "");
-    }).filter(function (candidate) {
-        return candidate && candidate !== "jobs" && candidate !== "saved";
+    const categories = Object.keys(CATEGORY_MAP).filter(function (category) {
+        return category !== "saved" && category !== "jobs" && category !== currentCategory;
     });
 
-    const currentIndex = navigationCategories.indexOf(category);
-    if (currentIndex < 0 || navigationCategories.length < 2) {
-        return;
-    }
-
-    const nextCategory = navigationCategories[
-        (currentIndex + 1) % navigationCategories.length
-    ];
-    const warmNext = function () {
-        if (currentCategory === category && !currentSearchQuery) {
-            prefetchCategory(nextCategory);
+    const warmNextCategory = function () {
+        if (categories.length === 0) return;
+        if (document.hidden) {
+            window.setTimeout(warmNextCategory, 5000);
+            return;
         }
+
+        const category = categories.shift();
+        prefetchCategory(category).finally(function () {
+            if (categories.length === 0) return;
+            if (typeof window.requestIdleCallback === "function") {
+                window.requestIdleCallback(warmNextCategory, { timeout: 1500 });
+            } else {
+                window.setTimeout(warmNextCategory, 350);
+            }
+        });
     };
-    warmNext();
+
+    if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(warmNextCategory, { timeout: 2000 });
+    } else {
+        window.setTimeout(warmNextCategory, 800);
+    }
 }
 
 async function prefetchCategory(category) {
@@ -968,11 +1011,12 @@ async function loadNews(category, forceFresh = false) {
             searchInput.value = "";
         }
 
+        scheduleCategoryWarmup();
+
         renderNews(
             currentDisplayedArticles,
             ""
         );
-        scheduleNextCategoryPrefetch(category);
 
         console.log(
             "FRONTEND CACHE HIT:",
@@ -1058,16 +1102,18 @@ async function loadNews(category, forceFresh = false) {
                     published_at:
                         article.published_at || ""
                 };
+            }).filter(function (article) {
+                return category !== "latest" || hasFullLatestDescription(article);
             });
 
-        allArticles = forceFreshRequest
+        allArticles = forceFreshRequest || category === "latest"
             ? freshArticles
             : mergeUniqueArticles(
                 freshArticles,
                 getFreshStaleCategoryCache(category, cachedSnapshot) || []
             );
 
-        if (category === "weather" && !isCompleteWeatherCache(allArticles)) {
+        if (!isCompleteCategorySet(allArticles, category)) {
             allArticles = freshArticles;
         }
 
@@ -1102,7 +1148,8 @@ async function loadNews(category, forceFresh = false) {
             currentDisplayedArticles,
             ""
         );
-        scheduleNextCategoryPrefetch(category);
+
+        scheduleCategoryWarmup();
 
     } catch (error) {
 
@@ -1450,6 +1497,30 @@ function renderJobsIntelligence(data) {
         }).join("");
     }
 
+    function renderGovernmentOpportunities(items) {
+        items = safeArray(items);
+        const stateItems = items.filter((item) => String(item.scope || "").toLowerCase() === "state");
+        const centralItems = items.filter((item) => String(item.scope || "").toLowerCase() === "central");
+        const generalItems = items.filter((item) => !["state", "central"].includes(String(item.scope || "").toLowerCase()));
+
+        return `
+            <div class="jobs-government-group">
+                <h4>State Government Openings</h4>
+                ${renderOpportunityList(stateItems, "government")}
+            </div>
+            <div class="jobs-government-group">
+                <h4>Central Government Openings</h4>
+                ${renderOpportunityList(centralItems, "government")}
+            </div>
+            ${generalItems.length ? `
+                <div class="jobs-government-group">
+                    <h4>Other Government Openings</h4>
+                    ${renderOpportunityList(generalItems, "government")}
+                </div>
+            ` : ""}
+        `;
+    }
+
 
     function renderSkills(items) {
 
@@ -1545,7 +1616,7 @@ function renderJobsIntelligence(data) {
                         <h3>Government Opportunities</h3>
                     </div>
 
-                    ${renderOpportunityList(
+                    ${renderGovernmentOpportunities(
                         data.government_opportunities,
                         "government"
                     )}
@@ -1555,7 +1626,7 @@ function renderJobsIntelligence(data) {
                 <div class="jobs-intel-card private">
                     <div class="jobs-intel-card-header">
                         <span class="jobs-intel-icon">💼</span>
-                        <h3>Private-Sector Opportunities</h3>
+                        <h3>Private-Sector Openings Worldwide</h3>
                     </div>
 
                     ${renderOpportunityList(
@@ -1836,18 +1907,26 @@ async function translateArticle(selectElement) {
 // EXPLAIN LIKE I'M 10
 // ============================================================
 
-function splitELI10IntoTwoLines(explanation) {
-    const text = String(explanation || "")
+function splitELI10IntoTwoLines(explanation, article = null) {
+    let text = String(explanation || "")
         .replace(/(?:^|\s)(?:[-*•]+|\d+[.)])\s*/g, " ")
         .replace(/\s+/g, " ")
         .trim();
+    if (!text) {
+        text = [article?.title, article?.description]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
     if (!text) return ["", ""];
 
     const sentences = (text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text])
         .map((sentence) => sentence.replace(/^\s*(?:[-*•]+|\d+[.)])\s*/, "").trim())
         .filter(Boolean);
     if (sentences.length >= 2) {
-        return [sentences[0], sentences.slice(1).join(" ")];
+        return [sentences[0], sentences[1]];
     }
 
     const words = (sentences[0] || text).split(" ");
@@ -1941,7 +2020,7 @@ async function explainArticleELI10(index, buttonElement) {
             );
         }
 
-        const explanationLines = splitELI10IntoTwoLines(data.explanation || "");
+        const explanationLines = splitELI10IntoTwoLines(data.explanation || "", article);
 
         resultContainer.innerHTML = `
             <div class="eli10-result">
@@ -1994,6 +2073,37 @@ async function explainArticleELI10(index, buttonElement) {
 // ============================================================
 // AI SUMMARY
 // ============================================================
+
+async function waitForArticleAnalysis(key, articleKey, index, resultContainer) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+
+        const displayedArticle = currentDisplayedArticles[index];
+        const displayedKey = displayedArticle && (displayedArticle.url || displayedArticle.title);
+        if (!resultContainer.isConnected || displayedKey !== articleKey) return;
+
+        try {
+            const response = await fetch(
+                `${API_BASE_URL}/summarize/status?key=${encodeURIComponent(key)}`,
+                { cache: "no-store" }
+            );
+            if (!response.ok) continue;
+
+            const state = await response.json();
+            if (state.status === "complete" && state.result) {
+                renderAIAnalysis(
+                    resultContainer,
+                    normalizeAIResponse(state.result),
+                    displayedArticle
+                );
+                return;
+            }
+            if (state.status === "failed") return;
+        } catch (error) {
+            console.debug("AI analysis is still processing:", error);
+        }
+    }
+}
 
 async function summarizeArticle(index, buttonElement) {
 
@@ -2120,8 +2230,19 @@ async function summarizeArticle(index, buttonElement) {
 
         renderAIAnalysis(
             resultContainer,
-            analysis
+            analysis,
+            article
         );
+
+        if (data.pending && data.analysis_key) {
+            const articleKey = article.url || article.title;
+            await waitForArticleAnalysis(
+                data.analysis_key,
+                articleKey,
+                index,
+                resultContainer
+            );
+        }
 
     } catch (error) {
 
@@ -2215,7 +2336,69 @@ function normalizeAIResponse(data) {
 // RENDER AI ANALYSIS
 // ============================================================
 
-function renderAIAnalysis(container, analysis) {
+function getArticleAnalysisFacts(article) {
+    const text = [article?.title, article?.description]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .join(" ");
+    const candidates = [];
+    for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+        candidates.push(sentence.trim());
+        candidates.push(...sentence.split(/\s*[;:—–]\s*|,\s+|\s+(?:and|but|while)\s+/i));
+    }
+
+    const facts = [];
+    for (const candidate of candidates) {
+        const fact = candidate.replace(/\s+/g, " ").trim().replace(/^[,.;:—–\s]+|[,.;:—–\s]+$/g, "");
+        if (fact.split(/\s+/).length < 3) continue;
+        if (!facts.some((existing) => existing.toLowerCase() === fact.toLowerCase())) facts.push(fact);
+        if (facts.length === 3) return facts;
+    }
+
+    const words = text.match(/\S+/g) || [];
+    for (let part = 0; part < 3 && words.length; part += 1) {
+        const start = Math.round(part * words.length / 3);
+        const end = Math.round((part + 1) * words.length / 3);
+        const excerpt = words.slice(start, end).join(" ").replace(/^[,.;:—–\s]+|[,.;:—–\s]+$/g, "");
+        if (excerpt && !facts.some((existing) => existing.toLowerCase() === excerpt.toLowerCase())) facts.push(excerpt);
+    }
+    return facts.slice(0, 3);
+}
+
+function analysisPointsRepeat(first, second) {
+    const stopWords = new Set(["the", "and", "for", "from", "with", "that", "this", "was", "were", "has", "have", "will", "are", "its", "their", "about", "into", "after", "before", "who", "what"]);
+    const tokens = (value) => new Set(
+        String(value || "").toLowerCase().match(/[a-z0-9]+/g)?.filter((word) => word.length > 2 && !stopWords.has(word)) || []
+    );
+    const left = tokens(first);
+    const right = tokens(second);
+    const shared = [...left].filter((word) => right.has(word)).length;
+    const overlap = shared / Math.max(1, Math.min(left.size, right.size));
+    return String(first).trim().toLowerCase() === String(second).trim().toLowerCase() || (shared >= 3 && overlap >= 0.65);
+}
+
+function getThreeAnalysisPoints(value, article) {
+    const placeholders = /^(?:no .* identified|no additional information|no summary available|no key points|not stated in the article|ai analysis could not be generated|the article was received by the local newsroom|ollama was unable|the importance of this article depends|people, organizations, industries|further developments will depend)/i;
+    const result = [];
+    const addDistinct = (candidate) => {
+        const point = String(candidate || "").trim();
+        if (!point || placeholders.test(point)) return;
+        if (!result.some((existing) => analysisPointsRepeat(point, existing))) result.push(point);
+    };
+
+    getArray(value).forEach(addDistinct);
+    getArticleAnalysisFacts(article).forEach((fact) => {
+        if (result.length < 3) addDistinct(fact);
+    });
+    if (result.length < 3) {
+        getArticleAnalysisFacts(article).forEach((fact) => {
+            if (result.length < 3 && !result.some((existing) => existing.toLowerCase() === fact.toLowerCase())) result.push(fact);
+        });
+    }
+    return result.slice(0, 3);
+}
+
+function renderAIAnalysis(container, analysis, article = null) {
 
     // ========================================================
     // AI TOPICS
@@ -2257,20 +2440,11 @@ function renderAIAnalysis(container, analysis) {
             : "";
 
 
-    const summary =
-        getArray(
-            analysis.summary
-        );
+    const summary = getThreeAnalysisPoints(analysis.summary, article);
 
-    const keyPoints =
-        getArray(
-            analysis.key_points
-        );
+    const keyPoints = getThreeAnalysisPoints(analysis.key_points, article);
 
-    const whyItMatters =
-        getArray(
-            analysis.why_it_matters
-        );
+    const whyItMatters = getThreeAnalysisPoints(analysis.why_it_matters, article);
 
     const importanceScore =
         normalizeScore(
@@ -2293,15 +2467,9 @@ function renderAIAnalysis(container, analysis) {
             "NEUTRAL"
         );
 
-    const whoIsAffected =
-        getArray(
-            analysis.who_is_affected
-        );
+    const whoIsAffected = getThreeAnalysisPoints(analysis.who_is_affected, article);
 
-    const whatHappensNext =
-        getArray(
-            analysis.what_happens_next
-        );
+    const whatHappensNext = getThreeAnalysisPoints(analysis.what_happens_next, article);
 
 container.innerHTML = `
         <section class="ai-analysis">
@@ -2370,154 +2538,28 @@ container.innerHTML = `
 
             ${topicsHTML}
 <div class="ai-section">
-
                 <h3>Summary</h3>
-
-                ${summary.length
-                    ? `
-                        <ul class="ai-bullet-list">
-                            ${summary
-                                .slice(0, 3)
-                                .map(function (point) {
-                                    return `
-                                        <li>
-                                            ${escapeHTML(
-                                                point
-                                            )}
-                                        </li>
-                                    `;
-                                })
-                                .join("")}
-                        </ul>
-                    `
-                    : `
-                        <p class="muted">
-                            No summary available.
-                        </p>
-                    `
-                }
-
+                <ul class="ai-bullet-list">${summary.map((point) => `<li>${escapeHTML(point)}</li>`).join("")}</ul>
             </div>
 
             <div class="ai-section">
-
                 <h3>Key Points</h3>
-
-                ${
-                    keyPoints.length
-                        ? `
-                            <ul>
-                                ${keyPoints
-                                    .slice(0, 3)
-                                    .map(function (point) {
-                                        return `
-                                            <li>
-                                                ${escapeHTML(
-                                                    point
-                                                )}
-                                            </li>
-                                        `;
-                                    })
-                                    .join("")}
-                            </ul>
-                        `
-                        : `
-                            <p class="muted">
-                                No key points identified.
-                            </p>
-                        `
-                }
-
+                <ul class="ai-bullet-list">${keyPoints.map((point) => `<li>${escapeHTML(point)}</li>`).join("")}</ul>
             </div>
 
             <div class="ai-section">
-
                 <h3>Why It Matters</h3>
-
-                ${whyItMatters.length
-                    ? `
-                        <ul class="ai-bullet-list">
-                            ${whyItMatters
-                                .slice(0, 3)
-                                .map(function (point) {
-                                    return `
-                                        <li>
-                                            ${escapeHTML(
-                                                point
-                                            )}
-                                        </li>
-                                    `;
-                                })
-                                .join("")}
-                        </ul>
-                    `
-                    : `
-                        <p class="muted">
-                            No additional information available.
-                        </p>
-                    `
-                }
-
+                <ul class="ai-bullet-list">${whyItMatters.map((point) => `<li>${escapeHTML(point)}</li>`).join("")}</ul>
             </div>
 
             <div class="ai-section">
-
                 <h3>Who Is Affected</h3>
-
-                ${whoIsAffected.length
-                    ? `
-                        <ul class="ai-bullet-list">
-                            ${whoIsAffected
-                                .slice(0, 3)
-                                .map(function (point) {
-                                    return `
-                                        <li>
-                                            ${escapeHTML(
-                                                point
-                                            )}
-                                        </li>
-                                    `;
-                                })
-                                .join("")}
-                        </ul>
-                    `
-                    : `
-                        <p class="muted">
-                            No specific groups identified.
-                        </p>
-                    `
-                }
-
+                <ul class="ai-bullet-list">${whoIsAffected.map((point) => `<li>${escapeHTML(point)}</li>`).join("")}</ul>
             </div>
 
             <div class="ai-section">
-
                 <h3>What Happens Next</h3>
-
-                ${whatHappensNext.length
-                    ? `
-                        <ul class="ai-bullet-list">
-                            ${whatHappensNext
-                                .slice(0, 3)
-                                .map(function (point) {
-                                    return `
-                                        <li>
-                                            ${escapeHTML(
-                                                point
-                                            )}
-                                        </li>
-                                    `;
-                                })
-                                .join("")}
-                        </ul>
-                    `
-                    : `
-                        <p class="muted">
-                            No specific next steps identified.
-                        </p>
-                    `
-                }
-
+                <ul class="ai-bullet-list">${whatHappensNext.map((point) => `<li>${escapeHTML(point)}</li>`).join("")}</ul>
             </div>
 
             </section>
@@ -2870,9 +2912,9 @@ function cleanArticleDescription(description) {
     return value;
 }
 
-// Keep Latest summaries within four visual lines without ending mid-sentence.
+// Keep category descriptions within four visual lines without ending mid-sentence.
 function fitRenderedArticleDescriptions(container = newsContainer) {
-    if (!container || container.dataset.category !== "latest") return;
+    if (!container || !CATEGORY_MAP[container.dataset.category]) return;
 
     const segmentSentences = (text) => {
         // Keep name initials and Indian honorifics inside a sentence.
@@ -2933,7 +2975,43 @@ function fitRenderedArticleDescriptions(container = newsContainer) {
             else break;
         }
 
-        paragraph.textContent = fittedText || fullText;
+        if (!fittedText) {
+            // When a source supplies one long sentence (or omits its final
+            // punctuation), falling back to fullText lets the CSS clamp cut
+            // it silently in the middle of a line. Fit a clear word-boundary
+            // excerpt and mark the omission instead.
+            const firstSentence = sentences[0] || fullText;
+            const words = firstSentence.split(/\s+/).filter(Boolean);
+            let low = 1;
+            let high = words.length;
+            let best = words[0] ? `${words[0]}…` : "";
+
+            while (low <= high) {
+                const middle = Math.floor((low + high) / 2);
+                const excerpt = `${words.slice(0, middle).join(" ")}…`;
+                if (lineCount(excerpt) <= 4) {
+                    best = excerpt;
+                    low = middle + 1;
+                } else {
+                    high = middle - 1;
+                }
+            }
+
+            fittedText = best;
+        }
+
+        paragraph.textContent = fittedText;
+        if (fittedText && lineCount(fittedText) < 2) {
+            const words = fittedText.split(/\s+/).filter(Boolean);
+            if (words.length > 1) {
+                const splitAt = Math.ceil(words.length / 2);
+                paragraph.replaceChildren(
+                    document.createTextNode(words.slice(0, splitAt).join(" ")),
+                    document.createElement("br"),
+                    document.createTextNode(words.slice(splitAt).join(" "))
+                );
+            }
+        }
         paragraph.dataset.latestFittedDescription = paragraph.textContent.trim();
         if (savedStyle === null) paragraph.removeAttribute("style");
         else paragraph.setAttribute("style", savedStyle);
@@ -3685,7 +3763,10 @@ async function updateHeadlineTicker() {
 
 if (!window.__latestHot5MinuteRefresh) {
     window.__latestHot5MinuteRefresh = setInterval(function () {
-        if (typeof updateHeadlineTicker === "function") {
+        if (
+            document.visibilityState === "visible" &&
+            typeof updateHeadlineTicker === "function"
+        ) {
             updateHeadlineTicker();
         }
     }, 5 * 60 * 1000);
@@ -3723,7 +3804,10 @@ console.log("LATEST & HOT will refresh every 5 minutes");
     }
 
     updateHeaderClock();
-    window.setInterval(updateHeaderClock, 1000);
+    window.setInterval(function () {
+        if (document.visibilityState === "visible") updateHeaderClock();
+    }, 60 * 1000);
+    window.addEventListener("focus", updateHeaderClock);
 })();
 
 

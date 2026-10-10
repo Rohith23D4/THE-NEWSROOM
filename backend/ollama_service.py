@@ -24,53 +24,78 @@ OLLAMA_TIMEOUT = 120
 # DEFAULT RESPONSE
 # ============================================================
 
-def default_analysis(title="", description=""):
-    return {
-"topics": [
-    "Topic 1",
-    "Topic 2",
-    "Topic 3"
-],
+def article_source_facts(title="", description=""):
+    """Extract distinct, verbatim facts and clauses from an article."""
+    candidates = []
+    text = " ".join(part.strip() for part in (str(title or ""), str(description or "")) if part.strip())
 
-        "summary": (
-            "AI analysis could not be generated for this article."
-        ),
-        "key_points": [
-            "The article was received by the local newsroom.",
-            "Ollama was unable to provide the complete analysis.",
-        ],
-        "why_it_matters": (
-            "The importance of this article depends on its subject "
-            "and potential impact on people, industries, or society."
-        ),
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        sentence = re.sub(r"\s+", " ", sentence).strip(" \t\r\n-–—")
+        if not sentence:
+            continue
+        candidates.append(sentence)
+        clauses = re.split(r"\s*(?:;|—|–|:)\s*|,\s+(?=(?:and|but|while|whereas|as)\b)", sentence, flags=re.IGNORECASE)
+        candidates.extend(clause.strip(" ,.;:—–") for clause in clauses if clause.strip(" ,.;:—–"))
+
+    # A title plus a long compound sentence often contains several separate
+    # reported facts. Retain those source clauses so fallback bullets stay
+    # article-specific when the local model returns malformed or empty JSON.
+    for sentence in re.split(r"(?<=[.!?])\s+", str(description or "")):
+        if len(sentence.split()) < 12:
+            continue
+        clauses = re.split(r",\s+|\s+(?:and|but|while|whereas)\s+", sentence, flags=re.IGNORECASE)
+        candidates.extend(clause.strip(" ,.;:—–") for clause in clauses if len(clause.split()) >= 4)
+
+    unique = []
+    for candidate in candidates:
+        candidate = re.sub(r"\s+", " ", candidate).strip(" \t\r\n-–—")
+        if len(candidate.split()) < 4:
+            continue
+        if not any(points_repeat(candidate, prior) for prior in unique):
+            unique.append(candidate)
+
+    # If a short source has fewer than three distinct sentences/clauses, use
+    # three non-overlapping excerpts of its own wording. This keeps every UI
+    # section populated without adding a generic or invented claim.
+    if len(unique) < 3:
+        words = re.findall(r"\S+", text)
+        if words:
+            for chunk_index in range(3):
+                start = round(chunk_index * len(words) / 3)
+                end = round((chunk_index + 1) * len(words) / 3)
+                excerpt = " ".join(words[start:end]).strip(" ,.;:—–")
+                if len(excerpt.split()) >= 1 and not any(
+                    excerpt.casefold() == prior.casefold() for prior in unique
+                ):
+                    unique.append(excerpt)
+                if len(unique) >= 3:
+                    break
+
+    return unique
+
+
+def default_analysis(title="", description=""):
+    """Return a source-grounded fallback when Ollama is unavailable."""
+    facts = article_source_facts(title, description)
+    points = facts[:3]
+    return {
+        "topics": [],
+        "summary": list(points),
+        "key_points": list(points),
+        "why_it_matters": list(points),
         "importance_score": 50,
         "importance_level": "MEDIUM",
         "sentiment": "NEUTRAL",
-        "who_is_affected": (
-            "People, organizations, industries, or communities "
-            "connected to the topic of the article."
-        ),
-        "what_happens_next": (
-            "Further developments will depend on the events "
-            "described in the article."
-        ),
-        "career_impact": (
-            "The career impact depends on the article's topic "
-            "and its effect on industries and technology."
-        ),
-        "career_impact_score": 50,
-        "career_impact_level": "MEDIUM",
+        "who_is_affected": list(points),
+        "what_happens_next": list(points),
+        "career_impact": "Not stated in the article.",
+        "career_impact_score": 0,
+        "career_impact_level": "NONE",
         "skills_to_learn": [],
         "relevant_job_roles": [],
-        "career_opportunities": (
-            "No specific career opportunities could be identified."
-        ),
-        "who_should_care": (
-            "Students and professionals interested in the article's topic."
-        ),
-        "career_recommendation": (
-            "Follow developments in this field and build relevant skills."
-        ),
+        "career_opportunities": "Not stated in the article.",
+        "who_should_care": "Not stated in the article.",
+        "career_recommendation": "Not stated in the article.",
     }
 
 
@@ -104,6 +129,60 @@ def clean_json_text(text):
     )
 
     return text.strip()
+
+
+_ANALYSIS_STOP_WORDS = {
+    "the", "and", "for", "from", "with", "that", "this", "was", "were",
+    "has", "have", "will", "are", "its", "their", "they", "about", "into",
+    "after", "before", "by", "in", "on", "of", "to", "a", "an", "as",
+    "is", "be", "at", "it", "or", "but", "may", "could", "would",
+}
+
+
+def normalize_point_token(token):
+    """Normalize common inflections so paraphrased bullets compare alike."""
+    token = str(token or "").lower()
+    aliases = {
+        "issued": "issue", "issues": "issue", "issuing": "issue",
+        "affects": "affect", "affected": "affect", "affecting": "affect",
+        "covers": "cover", "covered": "cover", "covering": "cover",
+        "includes": "include", "included": "include", "including": "include",
+        "districts": "district", "warnings": "warning", "alerts": "alert",
+        "thunderstorms": "thunderstorm", "rains": "rain",
+    }
+    if token in aliases:
+        return aliases[token]
+    if len(token) > 5 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+    if len(token) > 4 and token.endswith("ed"):
+        return token[:-2]
+    if len(token) > 4 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def points_repeat(first, second):
+    """Return true for exact duplicates and close factual paraphrases."""
+    def tokens(value):
+        return {
+            normalized
+            for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+            if token not in _ANALYSIS_STOP_WORDS
+            for normalized in (normalize_point_token(token),)
+            if len(normalized) > 2 or normalized.isdigit()
+        }
+
+    first_text = re.sub(r"\s+", " ", str(first or "").casefold()).strip()
+    second_text = re.sub(r"\s+", " ", str(second or "").casefold()).strip()
+    if first_text == second_text:
+        return True
+    first_tokens = tokens(first)
+    second_tokens = tokens(second)
+    shared = len(first_tokens & second_tokens)
+    overlap = shared / max(1, min(len(first_tokens), len(second_tokens)))
+    return shared >= 3 and overlap >= 0.65
 
 
 # ============================================================
@@ -174,123 +253,45 @@ def normalize_analysis(data, title="", description=""):
     # HELPER
     # --------------------------------------------------------
 
-    def build_source_facts():
-        """
-        Create simple factual fallback points directly from
-        the supplied title and description.
-        """
+    source_facts = article_source_facts(title, description)
+    article_tokens = {
+        normalize_point_token(token)
+        for token in re.findall(r"[a-z0-9]+", f"{title} {description}".lower())
+        if len(token) > 2 and token not in _ANALYSIS_STOP_WORDS
+    }
 
-        import re
-
-        source_facts = []
-
-        title_text = str(title or "").strip()
-        description_text = str(description or "").strip()
-
-        if title_text:
-            source_facts.append(
-                title_text
-            )
-
-        # Split the description into sentences.
-        sentences = re.split(
-            r"(?<=[.!?])\s+",
-            description_text
+    def is_source_grounded(point):
+        point_tokens = {
+            normalize_point_token(token)
+            for token in re.findall(r"[a-z0-9]+", str(point or "").lower())
+            if len(token) > 2 and token not in _ANALYSIS_STOP_WORDS
+        }
+        shared = point_tokens & article_tokens
+        return len(shared) >= min(2, len(point_tokens)) and (
+            len(shared) / max(1, len(point_tokens)) >= 0.4
         )
-
-        for sentence in sentences:
-
-            sentence = sentence.strip()
-
-            if sentence:
-                source_facts.append(
-                    sentence
-                )
-
-        # Also split long sentences around semicolons.
-        expanded = []
-
-        for fact in source_facts:
-
-            parts = re.split(
-                r"\s*;\s*",
-                fact
-            )
-
-            for part in parts:
-
-                part = part.strip()
-
-                if part:
-                    expanded.append(part)
-
-        # Remove duplicates.
-        unique = []
-
-        for fact in expanded:
-
-            normalized = fact.lower().strip()
-
-            if normalized not in {
-                x.lower().strip()
-                for x in unique
-            }:
-                unique.append(fact)
-
-        return unique
-
-
-    source_facts = build_source_facts()
-
 
     def clean_points(value):
-
-        points = normalize_three_points(
-            value,
-            fallback=source_facts
-        )
-
-        cleaned = []
-
+        # Filter generic or unsupported model filler before filling gaps from
+        # verbatim facts in the source article.
+        points = normalize_three_points(value, fallback=[])
+        unique = []
         for point in points:
-
-            point = str(point or "").strip()
-
-            if not point:
+            point = str(point or "").strip().strip("'\"")
+            if not point or not is_source_grounded(point):
                 continue
+            if not any(points_repeat(point, existing) for existing in unique):
+                unique.append(point)
 
-            if (
-                len(point) >= 2
-                and point[0] == "'"
-                and point[-1] == "'"
+        for fact in source_facts:
+            if len(unique) >= 3:
+                break
+            if is_source_grounded(fact) and not any(
+                fact.casefold() == existing.casefold() for existing in unique
             ):
-                point = point[1:-1].strip()
+                unique.append(fact)
 
-            if (
-                len(point) >= 2
-                and point[0] == '"'
-                and point[-1] == '"'
-            ):
-                point = point[1:-1].strip()
-
-            if point:
-                cleaned.append(point)
-
-        # Absolute guarantee.
-        while len(cleaned) < 3:
-
-            if source_facts:
-                cleaned.append(
-                    source_facts[
-                        len(cleaned) % len(source_facts)
-                    ]
-                )
-            else:
-                cleaned.append(
-                    "The article reports the information described in its source."
-                )
-
-        return cleaned[:3]
+        return unique[:3]
 
     # --------------------------------------------------------
     # FIVE FACTUAL SECTIONS
@@ -316,72 +317,9 @@ def normalize_analysis(data, title="", description=""):
         data.get("what_happens_next")
     )
 
-    # Remove repeated ideas across headings as well as repeated bullets
-    # within one heading. When a generated point repeats an earlier fact,
-    # replace it with the next distinct source sentence available.
-    section_names = (
-        "summary",
-        "key_points",
-        "why_it_matters",
-        "who_is_affected",
-        "what_happens_next",
-    )
-    section_values = {
-        "summary": summary,
-        "key_points": key_points,
-        "why_it_matters": why_it_matters,
-        "who_is_affected": who_is_affected,
-        "what_happens_next": what_happens_next,
-    }
-    used_points = []
-
-    def point_tokens(value):
-        return {
-            token for token in re.findall(r"[a-z0-9]+", str(value).lower())
-            if len(token) > 2 and token not in {
-                "the", "and", "for", "from", "with", "that", "this",
-                "was", "were", "has", "have", "will", "are", "its",
-                "their", "they", "about", "into", "after", "before",
-            }
-        }
-
-    def repeats_existing(value):
-        current = point_tokens(value)
-        if not current:
-            return True
-        for prior in used_points:
-            prior_tokens = point_tokens(prior)
-            overlap = len(current & prior_tokens) / max(1, len(current | prior_tokens))
-            if value.strip().casefold() == prior.strip().casefold() or overlap >= 0.78:
-                return True
-        return False
-
-    source_fact_index = 0
-    for section_name in section_names:
-        clean_section = []
-        for point in section_values[section_name]:
-            candidate = point
-            if repeats_existing(candidate):
-                candidate = ""
-                while source_fact_index < len(source_facts):
-                    source_fact = source_facts[source_fact_index]
-                    source_fact_index += 1
-                    if not repeats_existing(source_fact):
-                        candidate = source_fact
-                        break
-            if not candidate:
-                # Retain the model's fact rather than manufacture details
-                # when the supplied source itself has no distinct facts.
-                candidate = point
-            clean_section.append(candidate)
-            used_points.append(candidate)
-        section_values[section_name] = clean_section[:3]
-
-    summary = section_values["summary"]
-    key_points = section_values["key_points"]
-    why_it_matters = section_values["why_it_matters"]
-    who_is_affected = section_values["who_is_affected"]
-    what_happens_next = section_values["what_happens_next"]
+    # Each heading is deduplicated independently. Distinct sections may need
+    # to refer to the same source fact, but no section should be left with fewer
+    # than three bullets because another heading used that fact first.
 
     # --------------------------------------------------------
     # IMPORTANCE SCORE
@@ -584,10 +522,10 @@ def normalize_analysis(data, title="", description=""):
 
 def normalize_three_points(value, fallback=None):
     """
-    Always return exactly 3 useful bullet points.
+    Return up to 3 distinct, useful bullet points.
 
     If Ollama returns fewer than 3 points, use source-derived
-    fallback information rather than placeholder text.
+    fallback information rather than repeating or paraphrasing a point.
     """
 
     import ast
@@ -695,17 +633,7 @@ def normalize_three_points(value, fallback=None):
     unique = []
 
     for point in points:
-
-        normalized = re.sub(
-            r"\s+",
-            " ",
-            point.lower()
-        ).strip()
-
-        if normalized and normalized not in {
-            re.sub(r"\s+", " ", x.lower()).strip()
-            for x in unique
-        }:
+        if point and not any(points_repeat(point, existing) for existing in unique):
             unique.append(point)
 
     points = unique[:3]
@@ -742,69 +670,8 @@ def normalize_three_points(value, fallback=None):
         if len(points) >= 3:
             break
 
-        normalized = re.sub(
-            r"\s+",
-            " ",
-            item.lower()
-        ).strip()
-
-        existing = {
-            re.sub(
-                r"\s+",
-                " ",
-                x.lower()
-            ).strip()
-            for x in points
-        }
-
-        if normalized not in existing:
+        if not any(points_repeat(item, existing) for existing in points):
             points.append(item)
-
-    # --------------------------------------------------------
-    # LAST RESORT: SAFE REPHRASING
-    # --------------------------------------------------------
-
-    # If the article only contains one or two usable facts,
-    # reuse those facts with clear wording rather than inventing
-    # a new fact.
-
-    if len(points) == 1:
-
-        original = points[0]
-
-        points.append(
-            f"The article also reports that {original.rstrip('.') }."
-        )
-
-        points.append(
-            f"The report specifically mentions: {original.rstrip('.') }."
-        )
-
-    elif len(points) == 2:
-
-        original = points[0]
-
-        points.append(
-            f"The article also highlights that {original.rstrip('.') }."
-        )
-
-    # --------------------------------------------------------
-    # ABSOLUTE GUARANTEE: EXACTLY 3
-    # --------------------------------------------------------
-
-    if len(points) == 0:
-
-        points = [
-            "The article reports the information described in its source.",
-            "The article provides the reported details shown above.",
-            "The article contains no additional details in the supplied text."
-        ]
-
-    while len(points) < 3:
-
-        points.append(
-            points[len(points) % len(points)]
-        )
 
     return points[:3]
 
@@ -851,14 +718,8 @@ If information is not explicitly present, write:
 
 MOST IMPORTANT RULE:
 
-NEVER invent a fact simply because a section requires
-three bullet points.
-
-It is ALWAYS better to write:
-
-"Not stated in the article."
-
-than to invent information.
+Do not invent facts. When a section has limited material, use three concise,
+distinct details directly stated in the source; never use generic filler.
 
 ============================================================
 EXAMPLE
@@ -893,16 +754,21 @@ in the source.
 ============================================================
 HOW TO WRITE THE FIVE SECTIONS
 ============================================================
+Every one of the five sections must contain exactly three bullet strings.
+Use only distinct details supported by the title or description. Never use
+generic filler or duplicate a point within a section.
+
 
 SUMMARY
 
-Return exactly three short, source-grounded bullet points.
-Use the overall event and its main details. Keep each point distinct.
+Return exactly three short, source-grounded bullet points, each no longer than
+18 words. Use the main event and distinct supporting details.
 
 KEY POINTS
 
-Return exactly three additional concrete details from the source.
-Do not repeat or rephrase any fact already used in SUMMARY.
+Return exactly three additional concrete details from the source, each no
+longer than 18 words.
+Do not repeat, summarize, or rephrase any fact already used in SUMMARY.
 Never add interpretation or create a new fact.
 
 ------------------------------------------------------------
@@ -924,8 +790,7 @@ Do NOT write general statements such as:
 unless the source explicitly says so.
 
 Return exactly three distinct points. Do not repeat facts from SUMMARY or KEY POINTS.
-If the source does not state significance, use three different concise statements
-that identify what significance is not stated; do not invent an impact.
+If significance is not directly stated, use distinct source facts that explain what the article reports; do not add consequences.
 
 ------------------------------------------------------------
 
@@ -948,8 +813,7 @@ Do NOT invent:
 unless the source explicitly mentions them.
 
 Return exactly three distinct points without repeating earlier sections.
-If fewer groups are named, use concise statements that identify the missing
-specific group details; do not invent groups.
+If fewer than three groups are named, use distinct source facts that identify the named people, organizations, or locations; never invent groups.
 
 ------------------------------------------------------------
 
@@ -971,8 +835,7 @@ Do NOT write:
 unless the source explicitly states those actions.
 
 Return exactly three distinct points without repeating earlier sections.
-If fewer future actions are stated, identify which next-step details are absent;
-do not predict or repeat facts from other sections.
+If no next step is stated, use distinct source facts about the reported status or actions; do not predict.
 
 ============================================================
 CAREER ANALYSIS
@@ -1043,11 +906,10 @@ Do not use Markdown.
 
 Do not add explanations outside JSON.
 
-Exactly three distinct strings are required in each of summary, key_points,
-why_it_matters, who_is_affected, and what_happens_next.
-Never repeat or paraphrase a point across sections. If a section lacks enough
-source material, use a distinct section-specific note about what is not stated;
-never invent facts or reuse an earlier point.
+Each of summary, key_points, why_it_matters, who_is_affected, and
+what_happens_next must contain exactly three concise, article-grounded strings.
+Never repeat a point within a section. If details are limited, use distinct
+source facts or shorter source-grounded details rather than generic filler.
 
 ============================================================
 JSON STRUCTURE
@@ -1111,11 +973,9 @@ FINAL SELF-CHECK
 
 Before returning the JSON:
 
-1. Exactly 3 summary bullets.
-2. Exactly 3 key points.
-3. Exactly 3 why-it-matters bullets.
-4. Exactly 3 affected-group bullets.
-5. Exactly 3 next-step bullets.
+1. Return exactly 3 concise points in each of the five sections.
+2. Every point adds a distinct fact supported by the source.
+3. Use short, source-grounded details when a section has limited material.
 6. Every factual claim comes from the source.
 7. No outside knowledge.
 8. No predictions.
@@ -1273,6 +1133,135 @@ English description:
 # JOBS & CAREER INTELLIGENCE
 # ============================================================
 
+def _fallback_jobs_career(articles):
+    """Build conservative Jobs insights directly from the supplied articles."""
+    result = {
+        "government_opportunities": [],
+        "private_sector_opportunities": [],
+        "internships_freshers": [],
+        "future_job_market": [],
+        "skills_to_learn": [],
+    }
+    government_signals = (
+        "government", "govt", "public sector", "psu", "upsc", "ssc",
+        "railway", "railways", "ministry", "police recruitment", "nicl",
+        "bank recruitment", "post office recruitment",
+    )
+    central_government_signals = (
+        "central government", "union government", "ministry", "ministries",
+        "upsc", "ssc", "railway recruitment", "central public sector",
+        "public sector undertaking", "psu",
+    )
+    state_government_signals = (
+        "state government", "state psc", "public service commission",
+        "state police", "state health department", "state education department",
+        "telangana", "andhra pradesh", "karnataka", "tamil nadu", "kerala",
+        "maharashtra", "uttar pradesh", "rajasthan", "bihar", "odisha",
+        "west bengal", "gujarat", "madhya pradesh", "punjab", "haryana",
+        "assam", "jharkhand", "chhattisgarh", "goa", "uttarakhand",
+        "himachal pradesh", "manipur", "meghalaya", "tripura", "nagaland",
+        "mizoram", "sikkim", "arunachal pradesh",
+    )
+    excluded_signals = (
+        "scholarship", "merit list", "result pdf", "admission", "revaluation",
+        "answer key",
+    )
+    role_signals = (
+        "developer", "designer", "engineer", "technician", "dentist", "nurse",
+        "researcher", "foreman", "carpenter", "welder", "driver", "caretaker",
+        "officer", "analyst", "teacher", "accountant", "practitioner", "doctor",
+        "fire fighter", "fitter", "fabricator", "public health expert",
+    )
+    actionable_signals = (
+        "recruitment", "vacanc", "hiring", "apply", "application", "job opening",
+        "position", "post", "developer", "designer", "engineer", "technician",
+        "dentist", "nurse", "researcher", "foreman", "carpenter", "welder",
+        "driver", "caretaker", "officer", "analyst", "teacher", "accountant",
+        "practitioner", "doctor", "internship", "intern", "apprentice",
+    )
+    domain_signals = {
+        "Healthcare": ("dentist", "nurse", "clinical", "health", "doctor", "practitioner"),
+        "Technology and design": ("developer", "software", "python", "react", "ios", "android", "ui/ux", "designer"),
+        "Engineering and skilled trades": ("engineer", "welder", "hvac", "fitter", "fabricator", "carpenter", "foreman"),
+        "Public administration": ("officer", "government", "public sector", "nicl", "railway"),
+    }
+    skill_signals = (
+        "Python", "React", "Java", "JavaScript", "SQL", "UI/UX design",
+        "iOS development", "Android development", "HVAC", "welding",
+    )
+
+    opportunities = []
+    domain_roles = {domain: [] for domain in domain_signals}
+    domain_sources = {domain: [] for domain in domain_signals}
+    skill_roles = {skill: [] for skill in skill_signals}
+
+    for article in articles[:20]:
+        title = str(article.get("title", "")).strip()
+        description = str(article.get("description", "")).strip()
+        source = str(article.get("source", "")).strip()
+        text = f"{title} {description}".lower()
+        if not title or any(signal in text for signal in excluded_signals):
+            continue
+        if not any(signal in text for signal in actionable_signals):
+            continue
+
+        is_internship = any(term in text for term in ("internship", "intern ", "apprentice", "freshers"))
+        is_government = any(signal in text for signal in government_signals)
+        has_role = any(signal in text for signal in role_signals)
+        details = description or "See the source article for the listed role and application details."
+        item = {"title": title, "details": details[:500], "source": source}
+
+        if is_internship:
+            result["internships_freshers"].append(item)
+        elif is_government and any(term in text for term in ("recruitment", "vacanc", "hiring", "apply", "application")):
+            if any(signal in text for signal in state_government_signals):
+                item["scope"] = "state"
+            elif any(signal in text for signal in central_government_signals):
+                item["scope"] = "central"
+            else:
+                item["scope"] = "general"
+            result["government_opportunities"].append(item)
+        elif has_role:
+            result["private_sector_opportunities"].append(item)
+        else:
+            continue
+
+        for domain, signals in domain_signals.items():
+            if any(signal in text for signal in signals):
+                domain_roles[domain].append(title)
+                if source and source not in domain_sources[domain]:
+                    domain_sources[domain].append(source)
+
+        for skill in skill_signals:
+            if skill.lower() in text and title not in skill_roles[skill]:
+                skill_roles[skill].append(title)
+
+    for key in ("government_opportunities", "private_sector_opportunities", "internships_freshers"):
+        result[key] = result[key][:5]
+
+    for domain, roles in domain_roles.items():
+        unique_roles = list(dict.fromkeys(roles))
+        if len(unique_roles) < 2:
+            continue
+        result["future_job_market"].append({
+            "area": domain,
+            "trend": "Current Jobs articles report openings in this area; this describes the supplied listings, not a long-term forecast.",
+            "potential_roles": unique_roles[:5],
+            "source": ", ".join(domain_sources[domain][:3]),
+        })
+
+    for skill, roles in skill_roles.items():
+        if roles:
+            result["skills_to_learn"].append({
+                "skill": skill,
+                "why_it_matters": "This skill is named in current job listings.",
+                "related_roles": roles[:4],
+            })
+
+    result["future_job_market"] = result["future_job_market"][:4]
+    result["skills_to_learn"] = result["skills_to_learn"][:6]
+    return result
+
 def analyze_jobs_career(articles):
     """
     Analyze the already-balanced Jobs articles and produce
@@ -1318,8 +1307,8 @@ def analyze_jobs_career(articles):
     articles_text = "\n\n".join(article_lines)
 
     prompt = f"""
-You are a Jobs and Career Intelligence analyst
-inside a local Indian news application.
+You are a Jobs and Career Intelligence analyst covering
+Indian state and central government recruitment and private-sector openings worldwide.
 
 Analyze the following current Jobs articles.
 
@@ -1332,8 +1321,9 @@ information for students, freshers and working professionals.
 IMPORTANT:
 
 1. Focus ONLY on:
-   - Government employment opportunities
-   - Private-sector employment opportunities
+   - State government employment opportunities in India
+   - Central government employment opportunities in India
+   - Private-sector employment opportunities from all countries
    - Internships
    - Fresher opportunities
    - Hiring trends
@@ -1361,6 +1351,14 @@ IMPORTANT:
 4. Only mention specific opportunities when the supplied
    articles support them.
 
+4a. For every government opportunity, include a "scope" field whose value is
+    exactly "state", "central", or "general". Use "state" only when a state
+    government or state-level recruiting body is identified. Use "central" only
+    when a Union ministry, central agency, UPSC, SSC, or central public employer
+    is identified. Use "general" if the article does not establish the level.
+    Private-sector items should identify the country or location when the article
+    provides it; do not restrict them to India.
+
 5. Clearly distinguish current opportunities from
    broader market trends.
 
@@ -1381,6 +1379,7 @@ Use exactly this structure:
   "government_opportunities": [
     {{
       "title": "Opportunity or trend",
+      "scope": "state, central, or general",
       "organization": "Organization name if supported",
       "details": "What the articles indicate",
       "source": "Source if supported"
@@ -1500,6 +1499,13 @@ RULES FOR LISTS:
         "skills_to_learn":
             result.get("skills_to_learn", []),
     }
+
+    # A model may return valid JSON with every section empty. Fill only those
+    # gaps from explicit roles, skills, and sources in the current articles.
+    fallback = _fallback_jobs_career(articles)
+    for key, items in fallback.items():
+        if not isinstance(result.get(key), list) or not result[key]:
+            result[key] = items
 
     print(
         "Government:",
@@ -1635,7 +1641,9 @@ Return ONLY the explanation.
 
     except Exception as error:
         print("ELI10 ERROR:", error)
-        return ""
+        # Keep the Explain action useful when the local model is unavailable.
+        # The UI formats this source-only text into two display lines.
+        return description or title
 
 def summarize_news(title, description=""):
 
@@ -1668,7 +1676,7 @@ def summarize_news(title, description=""):
 
     raw_response = call_ollama(
         prompt,
-        num_predict=900,
+        num_predict=650,
     )
 
     if not raw_response:

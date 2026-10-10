@@ -11445,8 +11445,28 @@ html.dark-mode .auth-divider::after { background: #725b4b; }
     margin-right: auto !important;
 }
 
+/* Keep Jobs and Weather summaries compact and readable without affecting other categories. */
+#news-container[data-category="jobs"] .news-card .article-description,
+#news-container[data-category="weather"] .news-card .article-description {
+    display: block !important;
+    width: 100% !important;
+    max-width: 76ch !important;
+    min-height: calc(1.55em * 2) !important;
+    max-height: none !important;
+    overflow: visible !important;
+    line-height: 1.55 !important;
+    text-overflow: clip !important;
+    -webkit-line-clamp: unset !important;
+}
+
 /* Keep the category strip pinned while reading on mobile Safari and Chrome. */
 @media (max-width: 767px) {
+    /* Avoid creating a root scrolling ancestor that disables sticky positioning. */
+    html,
+    body {
+        overflow-x: clip !important;
+    }
+
     body > nav.category-navigation {
         position: -webkit-sticky !important;
         position: sticky !important;

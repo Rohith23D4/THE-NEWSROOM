@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from news_service import (
     get_news,
@@ -22,11 +23,13 @@ from news_service import (
     get_publisher_description,
     description_matches_title,
     resolve_google_news_urls,
+    select_partial_balanced,
 )
 from ollama_service import (
     summarize_news,
     normalize_analysis,
     analyze_jobs_career,
+    _fallback_jobs_career,
     explain_like_im_10,
     compare_articles,
     translate_article_text,
@@ -46,6 +49,7 @@ from database import (
     save_summary,
     get_cached_jobs_intelligence,
     save_jobs_intelligence,
+    init_jobs_intelligence_cache,
 )
 
 
@@ -71,6 +75,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 
 # ============================================================
@@ -126,6 +131,12 @@ CATEGORY_RESPONSE_CACHE_TTL = 10 * 60
 CATEGORY_RESPONSE_CACHE_MAX_ENTRIES = 32
 CATEGORY_RESPONSE_CACHE = {}
 CATEGORY_RESPONSE_CACHE_LOCK = threading.Lock()
+
+# Article analysis runs outside the request path so its source-grounded fallback
+# can be shown immediately while the local model finishes generating details.
+ARTICLE_ANALYSIS_TASKS = {}
+ARTICLE_ANALYSIS_TASKS_LOCK = threading.Lock()
+ARTICLE_ANALYSIS_TASKS_MAX_ENTRIES = 128
 
 # The ticker already caches individual feeds. Caching the assembled response
 # avoids repeating parsing, de-duplication, and ranking on every page refresh.
@@ -408,6 +419,7 @@ FEEDS = [
 @app.on_event("startup")
 def startup_event():
     initialize_database()
+    init_jobs_intelligence_cache()
     print("DATABASE INITIALIZED")
 
 
@@ -532,6 +544,22 @@ def news(category: str = "Latest", refresh: bool = False):
             else get_news(search_category, force_refresh=refresh)
         )[:20]
 
+        # Enforce the same 20-story, four-to-six-publisher mix for every
+        # category, including responses served from an older in-process cache.
+        grouped_articles = {}
+        for article in articles:
+            publisher = str(article.get("source", "") or "").strip()
+            if publisher:
+                grouped_articles.setdefault(publisher, []).append(article)
+        balanced_articles = select_partial_balanced(
+            grouped_articles,
+            limit=20,
+            max_per_source=6,
+            require_4_to_6_sources=True,
+        )
+        if balanced_articles:
+            articles = balanced_articles
+
         # Google News can return a generic site tagline instead of an article
         # summary. Replace those placeholders on Latest with publisher copy;
         # if the publisher page has no real summary, omit that card rather than
@@ -581,8 +609,8 @@ def news(category: str = "Latest", refresh: bool = False):
                     if (
                         not summary
                         or placeholder in summary_key
-                        or len(summary) < 120
-                        or len(summary.split()) < 12
+                        or len(summary) < 320
+                        or len(summary.split()) < 20
                     ):
                         return index, None
                     return index, (publisher_url, summary)
@@ -613,26 +641,36 @@ def news(category: str = "Latest", refresh: bool = False):
                     clean_articles.append(article)
                 articles = clean_articles
 
-        # Cache only complete, balanced responses. A partial response must
-        # not become the category's short-term answer on the next visit.
-        if cached_response is None and len(articles) == 20:
-            source_counts = {}
-            for article in articles:
-                source = str(article.get("source", "Unknown")).strip() or "Unknown"
-                source_counts[source] = source_counts.get(source, 0) + 1
-            is_balanced_full_response = (
-                len(articles) == 20
-                and 4 <= len(source_counts) <= 6
-            )
-            if is_balanced_full_response:
-                with CATEGORY_RESPONSE_CACHE_LOCK:
-                    CATEGORY_RESPONSE_CACHE[cache_key] = (
-                        time.monotonic(),
-                        [dict(article) for article in articles],
-                        CATEGORY_RESPONSE_CACHE_TTL,
-                    )
-                    while len(CATEGORY_RESPONSE_CACHE) > CATEGORY_RESPONSE_CACHE_MAX_ENTRIES:
-                        CATEGORY_RESPONSE_CACHE.pop(next(iter(CATEGORY_RESPONSE_CACHE)))
+        # Keep the Latest summary rule at the API boundary too. Publisher
+        # extraction above can replace a short Google News teaser after
+        # get_news() has already validated its articles, so enforce the same
+        # minimum here before the response reaches the browser.
+        if search_category == "latest":
+            articles = [
+                article
+                for article in articles
+                if len(str(article.get("description", "") or "").strip()) >= 320
+                and len(str(article.get("description", "") or "").split()) >= 20
+            ]
+
+        # Cache only complete, source-balanced category responses.
+        should_cache_response = len(articles) == 20
+        if should_cache_response:
+            response_sources = {
+                str(article.get("source", "Unknown")).strip() or "Unknown"
+                for article in articles
+            }
+            should_cache_response = 4 <= len(response_sources) <= 6
+
+        if cached_response is None and should_cache_response:
+            with CATEGORY_RESPONSE_CACHE_LOCK:
+                CATEGORY_RESPONSE_CACHE[cache_key] = (
+                    time.monotonic(),
+                    [dict(article) for article in articles],
+                    CATEGORY_RESPONSE_CACHE_TTL,
+                )
+                while len(CATEGORY_RESPONSE_CACHE) > CATEGORY_RESPONSE_CACHE_MAX_ENTRIES:
+                    CATEGORY_RESPONSE_CACHE.pop(next(iter(CATEGORY_RESPONSE_CACHE)))
 
         print(
             "CATEGORY RESPONSE CACHE:",
@@ -705,7 +743,7 @@ def news(category: str = "Latest", refresh: bool = False):
                 if str(article.get("title", "")).strip()
             ]
 
-            cache_key = "|".join(article_titles)
+            cache_key = "jobs-scope-v1|" + "|".join(article_titles)
 
             cached_result = None
 
@@ -714,6 +752,22 @@ def news(category: str = "Latest", refresh: bool = False):
                 cached_result = get_cached_jobs_intelligence(
                     cache_key
                 )
+
+            if isinstance(cached_result, dict) and not any(
+                isinstance(cached_result.get(key), list)
+                and cached_result.get(key)
+                for key in (
+                    "government_opportunities",
+                    "private_sector_opportunities",
+                    "internships_freshers",
+                    "future_job_market",
+                    "skills_to_learn",
+                )
+            ):
+                # Earlier model runs could cache an all-empty result forever.
+                # Treat that as a miss so the article-backed fallback can run.
+                print("JOBS INTELLIGENCE CACHE: EMPTY RESULT, REBUILDING")
+                cached_result = None
 
             if cached_result is not None:
 
@@ -726,9 +780,12 @@ def news(category: str = "Latest", refresh: bool = False):
             else:
 
                 print("JOBS INTELLIGENCE CACHE: MISS")
+                fallback_result = _fallback_jobs_career(articles)
                 status_key = _schedule_jobs_intelligence(cache_key, articles)
                 response["jobs_intelligence_key"] = status_key
-                response["jobs_intelligence"] = None
+                # Render evidence-based Jobs panels immediately while the
+                # optional local model analysis runs in the background.
+                response["jobs_intelligence"] = fallback_result
                 response["jobs_intelligence_cached"] = False
                 response["jobs_intelligence_pending"] = True
 
@@ -1813,95 +1870,98 @@ def compare_news_articles(payload: dict):
         "comparison": comparison
     }
 
+def _run_article_analysis(task_key, title, description):
+    try:
+        result = summarize_news(title, description)
+        result = normalize_analysis(result, title, description)
+        save_summary(title, result)
+        task_state = {"status": "complete", "result": result}
+        print("AI SUMMARY GENERATED:", title)
+    except Exception as error:
+        print("AI SUMMARY BACKGROUND ERROR:", error)
+        task_state = {"status": "failed", "result": None}
+
+    with ARTICLE_ANALYSIS_TASKS_LOCK:
+        ARTICLE_ANALYSIS_TASKS[task_key] = task_state
+
+
 @app.post("/summarize")
 def summarize(title: str, description: str):
-
     title = title.strip()
     description = description.strip()
 
     if not title:
-
         raise HTTPException(
             status_code=400,
             detail="Article title is required",
         )
 
-    print("=" * 70)
-    print("AI SUMMARY")
-    print("=" * 70)
-    print("TITLE:", title)
-
     try:
-
-        # ----------------------------------------------------
-        # CHECK CACHE
-        # ----------------------------------------------------
-
         cached_result = get_cached_summary(title)
-
         if cached_result is not None:
-
-            print("USING CACHED SUMMARY")
-
-            cached_result = normalize_analysis(
-                cached_result,
-                title,
-                description,
-            )
-
+            cached_result = normalize_analysis(cached_result, title, description)
             try:
                 save_summary(title, cached_result)
             except Exception as cache_error:
                 print("CACHE NORMALIZATION WARNING:", cache_error)
+            return {"summary": cached_result, "cached": True}
 
-            return {
-                "summary": cached_result,
-                "cached": True,
-            }
+        task_key = hashlib.sha256(
+            f"{title}\0{description}".encode("utf-8")
+        ).hexdigest()
+        with ARTICLE_ANALYSIS_TASKS_LOCK:
+            task = ARTICLE_ANALYSIS_TASKS.get(task_key)
+            if task and task.get("status") == "complete":
+                return {
+                    "summary": task["result"],
+                    "cached": True,
+                }
+            if not task or task.get("status") == "failed":
+                ARTICLE_ANALYSIS_TASKS[task_key] = {"status": "pending", "result": None}
+                worker = threading.Thread(
+                    target=_run_article_analysis,
+                    args=(task_key, title, description),
+                    daemon=True,
+                    name="article-analysis",
+                )
+                worker.start()
 
-        # ----------------------------------------------------
-        # CALL OLLAMA
-        # ----------------------------------------------------
+                while len(ARTICLE_ANALYSIS_TASKS) > ARTICLE_ANALYSIS_TASKS_MAX_ENTRIES:
+                    removable_key = next(
+                        (
+                            key for key, state in ARTICLE_ANALYSIS_TASKS.items()
+                            if state.get("status") != "pending"
+                        ),
+                        None,
+                    )
+                    if removable_key is None:
+                        break
+                    ARTICLE_ANALYSIS_TASKS.pop(removable_key, None)
 
-        result = summarize_news(
-            title,
-            description
-        )
-        result = normalize_analysis(result, title, description)
-
-        # ----------------------------------------------------
-        # SAVE SUMMARY TO CACHE
-        # ----------------------------------------------------
-
-        try:
-
-            save_summary(
-                title,
-                result
-            )
-
-        except Exception as cache_error:
-
-            print(
-                "CACHE SAVE WARNING:",
-                cache_error
-            )
-
-        print("AI SUMMARY GENERATED")
-
+        # This grounded response is rendered immediately. The UI replaces it
+        # with the full model analysis when the background task completes.
+        fallback = normalize_analysis(None, title, description)
         return {
-            "summary": result,
+            "summary": fallback,
             "cached": False,
+            "pending": True,
+            "analysis_key": task_key,
         }
-
+    except HTTPException:
+        raise
     except Exception as error:
-
         print("AI SUMMARY ERROR:", error)
-
         raise HTTPException(
             status_code=500,
             detail=f"Unable to generate AI summary: {str(error)}",
         )
+
+
+@app.get("/summarize/status")
+def summarize_status(key: str):
+    with ARTICLE_ANALYSIS_TASKS_LOCK:
+        state = ARTICLE_ANALYSIS_TASKS.get(key)
+        return dict(state) if state else {"status": "pending", "result": None}
 
 
 # ============================================================

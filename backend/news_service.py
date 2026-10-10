@@ -153,6 +153,9 @@ CATEGORY_FEEDS = {
         "https://news.abplive.com/news/india/feed",
         "https://news.google.com/rss/search?q=India+national+news+government+court+parliament+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=India+national+policy+Supreme+Court+election+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=site%3Anewindianexpress.com%2Fnation+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=site%3Adeccanherald.com%2Findia+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=site%3Atimesofindia.indiatimes.com%2Findia+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
     ],
 
     # Telangana:
@@ -206,6 +209,8 @@ CATEGORY_FEEDS = {
         "https://kannada.oneindia.com/rss/feeds/kannada-news-fb.xml",
         "https://newsable.asianetnews.com/rss",
         "https://indianexpress.com/section/cities/bangalore/feed/",
+        "https://www.hindustantimes.com/feeds/rss/cities/bengaluru-news/rssfeed.xml",
+        "https://www.thehansindia.com/rss/karnataka",
         "https://news.google.com/rss/search?q=Karnataka+Bengaluru+Bangalore+Mysuru+Mangaluru+news+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://indianexpress.com/section/india/feed/",
         "https://feeds.feedburner.com/ndtvnews-south",
@@ -291,6 +296,8 @@ CATEGORY_FEEDS = {
         "https://www.hindustantimes.com/feeds/rss/cities/delhi-news/rssfeed.xml",
         "https://timesofindia.indiatimes.com/rssfeeds/-2128839596.cms",
         "https://news.abplive.com/states/feed",
+        "https://feeds.feedburner.com/ndtvnews-india-news",
+        "https://news.google.com/rss/search?q=site%3Anewindianexpress.com%2Fstates%2Fdelhi+Delhi+OR+NCR+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=Delhi&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=Delhi+NCR+Noida+Gurugram+Ghaziabad+Faridabad+news+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=Delhi+government+court+transport+pollution+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
@@ -360,7 +367,9 @@ CATEGORY_FEEDS.update({
         "https://news.google.com/rss/search?q=India+jobs+notification+posts+apply+official+when%3A24h&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=India+public+sector+recruitment+vacancy+application+when%3A24h&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=India+state+government+recruitment+vacancies+posts+apply+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=state+government+recruitment+vacancies+PSC+India+apply+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=India+central+government+ministries+departments+recruitment+vacancies+apply+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=central+government+recruitment+UPSC+SSC+railway+ministries+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=India+state+public+service+commission+recruitment+vacancies+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=India+private+sector+company+job+openings+careers+apply+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=hiring+jobs+India+companies+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
@@ -377,6 +386,7 @@ CATEGORY_FEEDS.update({
         "https://news.google.com/rss/search?q=companies+worldwide+job+openings+recruitment+careers+apply+when%3A5d&hl=en&gl=US&ceid=US:en",
         "https://news.google.com/rss/search?q=global+employers+are+hiring+open+positions+apply+when%3A5d&hl=en&gl=US&ceid=US:en",
         "https://news.google.com/rss/search?q=remote+jobs+worldwide+company+careers+openings+when%3A5d&hl=en&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search?q=private+sector+jobs+openings+UK+Canada+Australia+Europe+Singapore+when%3A5d&hl=en&gl=US&ceid=US:en",
     ],
     "stocks": [
         "https://economictimes.indiatimes.com/markets/stocks/rss.cms",
@@ -754,6 +764,22 @@ def clean_text(text: str) -> str:
     )
 
     return text.strip()
+
+
+def separate_description_fragments(parts: List[str]) -> List[str]:
+    """Keep adjacent source excerpts from running together as one sentence."""
+    separated = []
+    for part in parts:
+        part = clean_text(str(part or ""))
+        if not part:
+            continue
+        # RSS summaries and publisher meta descriptions are often truncated
+        # without punctuation. Add a boundary before combining the next
+        # excerpt so words do not run together (for example, "surfers The").
+        if not re.search(r"[.!?][\"'’”)]*$", part):
+            part += "."
+        separated.append(part)
+    return separated
 
 
 def normalize_text(text: str) -> str:
@@ -2899,10 +2925,8 @@ def process_article(
         and (
         latest_initial_cutoff
         or latest_short_teaser
-        or
-        len(description) < 280
-        or len(description.split()) < 20
-        or len(split_sentences(description, latest_mode=latest_mode)) < 2
+        or (not latest_mode and len(description) < 120)
+        or (not latest_mode and len(description.split()) < 12)
         or (
             not is_active_job_listing(item)
             and not description_matches_title(title, description)
@@ -2947,8 +2971,8 @@ def process_article(
         min_description_chars = 320
         min_description_words = 20
     else:
-        min_description_chars = 80 if fast_search_mode else 280
-        min_description_words = 8 if fast_search_mode else 20
+        min_description_chars = 80 if fast_search_mode else 120
+        min_description_words = 8 if fast_search_mode else 12
 
     if (
         len(description) < min_description_chars
@@ -3542,6 +3566,7 @@ def matches_category(
             "tournament", "asian games", "sports", "movie", "film",
             "actor", "actress", "entertainment", "gaming", "video game",
             "politics", "political", "election", "minister", "parliament",
+            "protest", "protests",
             "business", "stock market", "stocks", "shares", "finance",
             "technology", "smartphone", "iphone", "android",
             "live streaming", "scorecard", "wicket", "innings",
@@ -3812,30 +3837,10 @@ def get_news(
         )
 
     if category == "weather":
-        # Keep Weather refreshes fast and current. Broad Latest feeds made
-        # each category change wait on many unrelated publishers and still
-        # produced few valid Weather headlines after filtering.
-        feeds = [
-            "https://odishatv.in/weather/feed",
-            "https://news.google.com/rss/search?q=India+weather+OR+rainfall+OR+monsoon+OR+cyclone+when%3A2d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=India+weather+forecast+OR+IMD+alert+OR+rain+warning+when%3A2d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=Telangana+OR+Andhra+Pradesh+OR+Karnataka+OR+Tamil+Nadu+OR+Kerala+OR+Maharashtra+OR+Delhi+local+news+when%3A2d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Ahindustantimes.com+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Andtv.com+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Athehindu.com+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Aindiatoday.in+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Atimesofindia.indiatimes.com+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Aeconomictimes.indiatimes.com+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Aindianexpress.com+India+weather+OR+rainfall+OR+cyclone+OR+monsoon+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-            "https://news.google.com/rss/search?q=site%3Aapnews.com+weather+OR+flood+OR+storm+OR+heatwave+when%3A5d&hl=en&gl=US&ceid=US:en",
-        ]
-
-    # The Jobs page was waiting on more than twenty independent RSS
-    # publishers before it could render. Prioritize a small, mixed set of
-    # direct vacancy and government/private-sector feeds for a fast first
-    # response; feed caching keeps repeat visits quick as well.
-    if category == "jobs":
-        feeds = feeds[:6]
+        # Use the full Weather feed set below. The smaller override omitted
+        # several publisher queries and a dedicated RSS source, leaving too
+        # few fresh, valid candidates to fill all 20 cards.
+        feeds = CATEGORY_FEEDS.get("weather", feeds)
 
     print("\n" + "=" * 70)
     print("GET NEWS:", requested_category)
@@ -4790,6 +4795,8 @@ def get_news(
             reverse=True,
         )
 
+    weather_resolved_candidates = []
+
     # Weather cards can be served directly from the already validated RSS
     # headlines and summaries. Crawling every publisher article page here
     # added a long wait without improving these feed-provided excerpts.
@@ -4854,25 +4861,32 @@ def get_news(
                             part,
                             flags=re.IGNORECASE,
                         ).strip()
-                    if len(part.split()) >= 12:
+                    if len(part.split()) >= 10:
                         cleaned_parts.append(part)
 
-                description = build_description(title, cleaned_parts)
-                if len(description) < 120 or len(description.split()) < 12:
+                description = build_description(
+                    title,
+                    separate_description_fragments(cleaned_parts),
+                )
+                if len(description) < 80 or len(description.split()) < 10:
                     description = next(
                         (
                             part for part in cleaned_parts
-                            if len(part) >= 120 and len(part.split()) >= 12
+                            if len(part) >= 80 and len(part.split()) >= 10
                         ),
                         "",
                     )
-                if len(description) < 120 or len(description.split()) < 12:
+                if len(description) < 80 or len(description.split()) < 10:
                     continue
                 # Keep the visible summary compact, continuous, and made of
                 # complete source sentences. The card CSS wraps this into a
                 # readable 2–4 line block without clipping it.
                 description = compact_card_description(title, description)
-                if len(description) < 120 or len(description.split()) < 12:
+                if (
+                    len(description) < 80
+                    or len(description.split()) < 10
+                    or not description_matches_title(title, description)
+                ):
                     continue
 
                 article = {
@@ -4921,6 +4935,7 @@ def get_news(
         weather_irrelevant_terms = (
             "malaria", "dengue", "mosquito", "chatbot", "flight",
             "plane", "aircraft", "indigo", "water conservation after",
+            "protest", "protests",
             "food prices", "rural demand", "stock market", "share price",
             "market flooding", "subsidised cars", "credit growth",
             "rural lending", "emergency landing", "wholesale",
@@ -4976,8 +4991,8 @@ def get_news(
 
         resolution_candidates = select_partial_balanced(
             weather_resolution_groups,
-            limit=48,
-            max_per_source=8,
+            limit=72,
+            max_per_source=12,
             require_4_to_6_sources=True,
         )
         if resolution_candidates:
@@ -4986,24 +5001,28 @@ def get_news(
 
             def build_weather_page_article(pair):
                 item, publisher_url = pair
-                if not publisher_url:
-                    return None
                 title = item.get("title", "")
                 rss_description = clean_text(item.get("description", ""))
-                page_description = get_publisher_description(
-                    publisher_url,
-                    title,
-                    rss_description,
-                    timeout=5,
+                page_description = (
+                    get_publisher_description(
+                        publisher_url,
+                        title,
+                        rss_description,
+                        timeout=5,
+                    )
+                    if publisher_url
+                    else ""
                 )
                 description = build_description(
                     title,
-                    [page_description, rss_description],
+                    separate_description_fragments(
+                        [page_description, rss_description]
+                    ),
                 )
                 description = compact_card_description(title, description)
                 if (
-                    len(description) < 120
-                    or len(description.split()) < 12
+                    len(description) < 80
+                    or len(description.split()) < 10
                     or not description_matches_title(title, description)
                     or not any(
                         term in f"{title} {description}".lower()
@@ -5014,7 +5033,9 @@ def get_news(
                 return {
                     "title": title,
                     "description": description,
-                    "url": publisher_url,
+                    # Keep the Google News link when a publisher URL cannot
+                    # be resolved but its RSS excerpt is complete and valid.
+                    "url": publisher_url or item.get("url", ""),
                     "source": item.get("source", ""),
                     "published_at": item.get("published_at", ""),
                 }
@@ -5051,7 +5072,8 @@ def get_news(
                 len({article["source"] for article in resolved_weather_articles}),
                 "sources",
             )
-            if resolved_weather_articles:
+            weather_resolved_candidates = resolved_weather_articles
+            if len(resolved_weather_articles) == 20:
                 return resolved_weather_articles
 
     print(
@@ -6481,6 +6503,8 @@ def get_news(
                 "election",
                 "minister",
                 "parliament",
+                "protest",
+                "protests",
                 "business",
                 "stock market",
                 "stocks",
@@ -7204,6 +7228,35 @@ def get_news(
             normalize_text(article.get("title", ""))
             for article in final_articles
         }
+        # Publisher-resolved Weather stories were already checked for a
+        # matching description, India relevance, freshness, and headline
+        # relevance. Carry this partial set forward so the final selector can
+        # combine it with validated RSS stories to complete 20 cards.
+        for article in weather_resolved_candidates:
+            url = str(article.get("url", "") or "").split("#", 1)[0].rstrip("/").lower()
+            title = str(article.get("title", "") or "").strip()
+            title_key = normalize_text(title)
+            description = compact_card_description(
+                title,
+                article.get("description", ""),
+            )
+            if (
+                not url
+                or not title_key
+                or not category_is_recent(article.get("published_at", ""))
+                or not is_english_text(title, description)
+                or len(description) < 80
+                or len(description.split()) < 10
+                or not description_matches_title(title, description)
+            ):
+                continue
+            publisher = source_name(article.get("source", ""))
+            candidate = dict(article)
+            candidate["description"] = description
+            candidate["source"] = publisher
+            rss_weather_groups.setdefault(publisher, []).append(candidate)
+            rss_urls.add(url)
+            rss_titles.add(title_key)
         rss_items = sorted(
             (
                 item
@@ -7261,12 +7314,18 @@ def get_news(
                     flags=re.IGNORECASE,
                 ).strip()
             if (
-                len(rss_description) < 120
-                or len(rss_description.split()) < 12
+                len(rss_description) < 80
+                or len(rss_description.split()) < 10
             ):
                 continue
 
             rss_description = compact_card_description(title, rss_description)
+            if (
+                len(rss_description) < 80
+                or len(rss_description.split()) < 10
+                or not description_matches_title(title, rss_description)
+            ):
+                continue
             article = {
                 "title": title,
                 "description": rss_description,
@@ -7296,7 +7355,7 @@ def get_news(
             )
             final_articles = rss_weather_articles
 
-    if category == "weather":
+    if category in {"weather", "jobs"}:
         for article in final_articles:
             article["description"] = compact_card_description(
                 article.get("title", ""),
@@ -10856,50 +10915,39 @@ OUTPUT RULES:
             [],
         )
 
-        # IMPORTANT:
-        # Stop immediately after obtaining 5 valid articles.
-        for score, item in articles:
-
-            if len(valid_articles) >= 5:
-                break
-
+        def process_category_candidate(item):
             article = dict(item)
-
-            article.pop(
-                "_feed_url",
-                None,
-            )
-
+            article.pop("_feed_url", None)
             try:
-
-                processed = process_article(
-                    article,
-                    rss_fallback_mode=False,
-                )
-
-                if not processed:
-                    continue
-
-                if not valid_description(
-                    processed
-                ):
-                    continue
-
-                valid_articles.append(
-                    processed
-                )
-
-                print(
-                    f"VALID [{source_name}] "
-                    f"{len(valid_articles)}/5"
-                )
-
+                return process_article(article, rss_fallback_mode=False)
             except Exception as error:
-
                 print(
                     f"ARTICLE ERROR "
                     f"[{source_name}]: {error}"
                 )
+                return None
+
+        # Article pages are network-bound. Fetch candidates in small,
+        # ordered batches so a few slow publishers do not serialize a whole
+        # category load or trigger requests for the entire feed at once.
+        for batch_start in range(0, len(articles), MAX_WORKERS):
+            if len(valid_articles) >= 5:
+                break
+            batch = articles[batch_start:batch_start + MAX_WORKERS]
+            with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(batch))) as executor:
+                for processed in executor.map(
+                    lambda pair: process_category_candidate(pair[1]),
+                    batch,
+                ):
+                    if not processed or not valid_description(processed):
+                        continue
+                    valid_articles.append(processed)
+                    print(
+                        f"VALID [{source_name}] "
+                        f"{len(valid_articles)}/5"
+                    )
+                    if len(valid_articles) >= 5:
+                        break
 
         return valid_articles
 
