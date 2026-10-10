@@ -14,7 +14,6 @@ const CATEGORY_CACHE_TTL = 10 * 60 * 1000;
 // v3 invalidates snapshots created before every category required a balanced
 // 20-article set from four to six publishers.
 const CATEGORY_CACHE_STORAGE_PREFIX = "newsroom-category-cache-v3:";
-let hasLoadedInitialCategory = false;
 let categoryLoadSequence = 0;
 let lastObservedIndiaDate = indiaCalendarDate(new Date());
 let freshCategoryRequestSequence = 0;
@@ -971,8 +970,10 @@ async function pollJobsIntelligence(statusKey) {
 async function loadNews(category, forceFresh = false) {
 
     const loadId = ++categoryLoadSequence;
-    const forceFreshRequest = forceFresh || !hasLoadedInitialCategory;
-    hasLoadedInitialCategory = true;
+    // Reuse validated browser and backend caches on first load. The cached
+    // entries already enforce age, article-count, and source-diversity rules;
+    // explicit refreshes and the periodic refresh still request fresh feeds.
+    const forceFreshRequest = forceFresh;
 
     category =
         normalizeCategory(category);
