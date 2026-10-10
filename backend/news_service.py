@@ -2940,8 +2940,15 @@ def process_article(
     ):
         return None
 
-    min_description_chars = 80 if fast_search_mode else 280
-    min_description_words = 8 if fast_search_mode else 20
+    # Latest should show article summaries, not very short RSS teasers. When
+    # a publisher blocks page extraction, skip its short snippet and let the
+    # category pipeline fill the slot from another source with fuller copy.
+    if latest_mode:
+        min_description_chars = 320
+        min_description_words = 20
+    else:
+        min_description_chars = 80 if fast_search_mode else 280
+        min_description_words = 8 if fast_search_mode else 20
 
     if (
         len(description) < min_description_chars
