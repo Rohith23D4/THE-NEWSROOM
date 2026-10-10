@@ -1987,7 +1987,7 @@ def get_saved_articles():
             """
             SELECT
                 id,
-                title,
+                article_title,
                 article_title,
                 description,
                 url,
@@ -2088,7 +2088,7 @@ def save_article(
             """
             SELECT id
             FROM saved_articles
-            WHERE title = ?
+            WHERE article_title = ?
             LIMIT 1
             """,
             (title,),
@@ -2112,17 +2112,15 @@ def save_article(
             """
             INSERT INTO saved_articles
             (
-                title,
                 article_title,
                 description,
                 url,
                 source,
                 published_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
-                title,
                 title,
                 description,
                 url,
