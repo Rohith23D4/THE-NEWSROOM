@@ -10959,15 +10959,21 @@ OUTPUT RULES:
 
         source_results = {}
 
-        # First try the sources already selected above.
-        for source_key, group in selected_sources:
+        # Publisher pages are network-bound. Process the selected sources
+        # concurrently while keeping the result order aligned with the
+        # existing source priority and each source's internal article order.
+        def process_selected_source(pair):
+            source_key, group = pair
+            return source_key, process_source_articles(source_key, group)
 
-            source_results[source_key] = (
-                process_source_articles(
-                    source_key,
-                    group,
-                )
-            )
+        with ThreadPoolExecutor(
+            max_workers=min(4, max(1, len(selected_sources)))
+        ) as executor:
+            for source_key, articles in executor.map(
+                process_selected_source,
+                selected_sources,
+            ):
+                source_results[source_key] = articles
 
         # ----------------------------------------------------
         # FINAL JOBS ARTICLE FILTER
@@ -11200,7 +11206,16 @@ OUTPUT RULES:
             return count
 
         processed_source_keys = set(source_results)
-        for source_key, group in source_list:
+        replacement_sources = [
+            (source_key, group)
+            for source_key, group in source_list
+            if source_key not in processed_source_keys
+        ]
+
+        # Replacement publishers can also be slow or unresponsive. Fetch
+        # them in small ordered batches, stopping as soon as the original
+        # source-count and article-count requirements are satisfied.
+        for batch_start in range(0, len(replacement_sources), 4):
             if (
                 len(usable_sources) >= 4
                 and category_fill_capacity(
@@ -11209,29 +11224,43 @@ OUTPUT RULES:
                 ) >= 20
             ):
                 break
-            if source_key in processed_source_keys:
-                continue
 
-            result = process_source_articles(source_key, group)
-            processed_source_keys.add(source_key)
+            batch = replacement_sources[batch_start:batch_start + 4]
+            with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+                batch_results = executor.map(
+                    lambda pair: process_source_articles(pair[0], pair[1]),
+                    batch,
+                )
 
-            # Apply the same Jobs opportunity gate to replacement feeds.
-            if category == "jobs":
-                filtered = []
-                for item in result:
-                    title = str(item.get("title", "") or "").strip().lower()
-                    description = str(item.get("description", "") or "").strip().lower()
-                    has_opportunity = any(
-                        term in f"{title} {description}"
-                        for term in jobs_opportunity_terms
-                    ) or bool(JOB_POSTING_PATTERN.search(f"{title} {description}")) or is_active_job_listing(item)
-                    if has_opportunity:
-                        filtered.append(item)
-                result = filtered
+                for (source_key, group), result in zip(batch, batch_results):
+                    if (
+                        len(usable_sources) >= 4
+                        and category_fill_capacity(
+                            source_results,
+                            [key for key, _ in usable_sources],
+                        ) >= 20
+                    ):
+                        break
 
-            source_results[source_key] = result
-            if len(result) >= 4:
-                usable_sources.append((source_key, group))
+                    processed_source_keys.add(source_key)
+
+                    # Apply the same Jobs opportunity gate to replacement feeds.
+                    if category == "jobs":
+                        filtered = []
+                        for item in result:
+                            title = str(item.get("title", "") or "").strip().lower()
+                            description = str(item.get("description", "") or "").strip().lower()
+                            has_opportunity = any(
+                                term in f"{title} {description}"
+                                for term in jobs_opportunity_terms
+                            ) or bool(JOB_POSTING_PATTERN.search(f"{title} {description}")) or is_active_job_listing(item)
+                            if has_opportunity:
+                                filtered.append(item)
+                        result = filtered
+
+                    source_results[source_key] = result
+                    if len(result) >= 4:
+                        usable_sources.append((source_key, group))
 
         # ----------------------------------------------------
         # FLEXIBLE SOURCE FILL
