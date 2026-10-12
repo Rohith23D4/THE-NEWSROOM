@@ -844,8 +844,11 @@ document.addEventListener("visibilitychange", function () {
 const categoryRequestsInFlight = {};
 let categoryWarmupTimer = null;
 let categoryWarmupIdleCallback = null;
+const CATEGORY_BACKGROUND_PREFETCH_ENABLED = false;
 
 function scheduleCategoryWarmup(activeCategory) {
+    if (!CATEGORY_BACKGROUND_PREFETCH_ENABLED) return;
+
     const navigableCategories = Object.keys(CATEGORY_MAP).filter(function (category) {
         return category !== "saved" && category !== "jobs";
     });
@@ -887,6 +890,8 @@ function scheduleCategoryWarmup(activeCategory) {
 }
 
 async function prefetchCategory(category) {
+    if (!CATEGORY_BACKGROUND_PREFETCH_ENABLED) return;
+
     category = normalizeCategory(category);
     if (
         !CATEGORY_MAP[category] ||
