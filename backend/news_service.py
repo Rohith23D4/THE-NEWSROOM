@@ -146,16 +146,11 @@ CATEGORY_FEEDS = {
     ],
 
     "india": [
-"https://www.thehindu.com/news/national/feeder/default.rss",
+        "https://www.thehindu.com/news/national/feeder/default.rss",
         "https://indianexpress.com/section/india/feed/",
         "https://feeds.feedburner.com/ndtvnews-india-news",
         "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
         "https://news.abplive.com/news/india/feed",
-        "https://news.google.com/rss/search?q=India+national+news+government+court+parliament+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-        "https://news.google.com/rss/search?q=India+national+policy+Supreme+Court+election+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-        "https://news.google.com/rss/search?q=site%3Anewindianexpress.com%2Fnation+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-        "https://news.google.com/rss/search?q=site%3Adeccanherald.com%2Findia+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
-        "https://news.google.com/rss/search?q=site%3Atimesofindia.indiatimes.com%2Findia+India+when%3A5d&hl=en-IN&gl=IN&ceid=IN:en",
     ],
 
     # Telangana:
