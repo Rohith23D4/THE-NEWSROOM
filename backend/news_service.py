@@ -4937,7 +4937,10 @@ def get_news(
             len(weather_articles),
             "fresh relevant articles",
         )
-        if len(weather_articles) == 20:
+        if weather_articles:
+            # A valid balanced RSS set is enough to populate Weather. Do not
+            # hold those usable cards while resolving dozens of Google News
+            # links and scraping publisher pages to reach exactly 20.
             return weather_articles
 
         # Google News RSS links usually carry a headline plus publisher name,
@@ -5014,13 +5017,13 @@ def get_news(
 
         resolution_candidates = select_partial_balanced(
             weather_resolution_groups,
-            limit=72,
-            max_per_source=12,
+            limit=24,
+            max_per_source=6,
             require_4_to_6_sources=True,
         )
         if resolution_candidates:
             google_urls = [item.get("url", "") for item in resolution_candidates]
-            publisher_urls = resolve_google_news_urls(google_urls)
+            publisher_urls = resolve_google_news_urls(google_urls, timeout=2)
 
             def build_weather_page_article(pair):
                 item, publisher_url = pair
@@ -5031,7 +5034,7 @@ def get_news(
                         publisher_url,
                         title,
                         rss_description,
-                        timeout=5,
+                        timeout=2,
                     )
                     if publisher_url
                     else ""
@@ -5495,7 +5498,10 @@ def get_news(
 
             process_batch(
                 batch,
-                category == "jobs",
+                # Category pages need to return from their verified RSS
+                # summaries without waiting on publisher pages. Keep Latest's
+                # longer-summary enrichment unchanged.
+                category != "latest",
             )
             processed_per_feed = limit
 
