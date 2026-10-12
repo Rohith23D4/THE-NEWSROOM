@@ -2683,9 +2683,9 @@ def process_article(
     item: dict,
     rss_fallback_mode: bool = False,
     fast_search_mode: bool = False,
-    category_rss_preferred: bool = False,
     max_age_hours: int = 48,
     latest_mode: bool = False,
+    category_rss_preferred: bool = False,
 ) -> Optional[dict]:
 
     title = clean_title(
@@ -5168,6 +5168,7 @@ def get_news(
                     category in {"jobs", "latest"},
                     freshness_hours,
                     latest_mode=(category == "latest"),
+                    category_rss_preferred=True,
                 ): item
                 for item in processing_batch
             }
