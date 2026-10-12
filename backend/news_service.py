@@ -2886,7 +2886,7 @@ def process_article(
             rss_description,
             timeout=(
                 4 if fast_search_mode
-                else 3 if category_rss_preferred
+                else 1 if category_rss_preferred
                 else ARTICLE_TIMEOUT
             ),
             latest_mode=latest_mode,
@@ -2957,7 +2957,7 @@ def process_article(
             rss_description,
             timeout=(
                 2 if fast_search_mode
-                else 3 if category_rss_preferred
+                else 1 if category_rss_preferred
                 else ARTICLE_TIMEOUT
             ),
             latest_mode=latest_mode,
