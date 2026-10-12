@@ -5458,7 +5458,6 @@ def get_news(
     # requests and can make regional categories time out.
     limits = [
         4,
-        8,
     ]
 
     previous = 0
@@ -5539,7 +5538,7 @@ def get_news(
                 feed_items
                 if category == "jobs"
                 else feed_items[
-                    processed_per_feed:processed_per_feed + 12
+                    processed_per_feed:processed_per_feed + 20
                 ]
             )
 
