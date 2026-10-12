@@ -2884,7 +2884,11 @@ def process_article(
             url,
             title,
             rss_description,
-            timeout=4 if fast_search_mode else ARTICLE_TIMEOUT,
+            timeout=(
+                4 if fast_search_mode
+                else 3 if category_rss_preferred
+                else ARTICLE_TIMEOUT
+            ),
             latest_mode=latest_mode,
         )
     # If the RSS feed has no usable description, keep the
@@ -2951,7 +2955,11 @@ def process_article(
             url,
             title,
             rss_description,
-            timeout=2 if fast_search_mode else ARTICLE_TIMEOUT,
+            timeout=(
+                2 if fast_search_mode
+                else 3 if category_rss_preferred
+                else ARTICLE_TIMEOUT
+            ),
             latest_mode=latest_mode,
         )
         page_summary = build_description(
