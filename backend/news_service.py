@@ -5495,13 +5495,13 @@ def get_news(
         ):
 
             feed_items = candidates_by_feed[feed_index]
-            fallback_items = (
-                feed_items
-                if category == "jobs"
-                else feed_items[
-                    processed_per_feed:processed_per_feed + 20
-                ]
-            )
+            # The first pass already checks four candidates per feed. Only
+            # inspect four more here: the source-balance limit is six stories
+            # per publisher, so processing the full RSS tail adds latency
+            # without increasing the maximum useful contribution per feed.
+            fallback_items = feed_items[
+                processed_per_feed:processed_per_feed + 4
+            ]
 
             for item in fallback_items:
 
