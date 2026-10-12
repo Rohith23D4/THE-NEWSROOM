@@ -2683,6 +2683,7 @@ def process_article(
     item: dict,
     rss_fallback_mode: bool = False,
     fast_search_mode: bool = False,
+    category_rss_preferred: bool = False,
     max_age_hours: int = 48,
     latest_mode: bool = False,
 ) -> Optional[dict]:
@@ -2843,8 +2844,21 @@ def process_article(
         "ndtv.com",
     )
 
+    category_rss_summary = build_description(
+        title,
+        [rss_description],
+        latest_mode=latest_mode,
+    )
+    category_rss_is_complete = (
+        category_rss_preferred
+        and len(category_rss_summary) >= 320
+        and len(category_rss_summary.split()) >= 20
+        and description_matches_title(title, category_rss_summary)
+    )
+
     is_rss_first = (
         rss_fallback_mode
+        or category_rss_is_complete
         or any(
             host in article_host
             for host in rss_only_hosts
@@ -4093,6 +4107,7 @@ def get_news(
                 executor.submit(
                     fetch_rss,
                     feed,
+                    timeout=6,
                     force_refresh=force_refresh,
                 )
             ] = (
@@ -10919,7 +10934,11 @@ OUTPUT RULES:
             article = dict(item)
             article.pop("_feed_url", None)
             try:
-                return process_article(article, rss_fallback_mode=False)
+                return process_article(
+                    article,
+                    rss_fallback_mode=False,
+                    category_rss_preferred=True,
+                )
             except Exception as error:
                 print(
                     f"ARTICLE ERROR "
