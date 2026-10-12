@@ -4937,7 +4937,7 @@ def get_news(
             len(weather_articles),
             "fresh relevant articles",
         )
-        if weather_articles:
+        if len(weather_articles) == 20:
             # A valid balanced RSS set is enough to populate Weather. Do not
             # hold those usable cards while resolving dozens of Google News
             # links and scraping publisher pages to reach exactly 20.
