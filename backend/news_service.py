@@ -2851,8 +2851,8 @@ def process_article(
     )
     category_rss_is_complete = (
         category_rss_preferred
-        and len(category_rss_summary) >= 320
-        and len(category_rss_summary.split()) >= 20
+        and len(category_rss_summary) >= 120
+        and len(category_rss_summary.split()) >= 12
         and description_matches_title(title, category_rss_summary)
     )
 
