@@ -826,6 +826,9 @@ window.addEventListener("focus", refreshAfterIndiaDateChange);
 document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") {
         refreshAfterIndiaDateChange();
+        if (currentCategory !== "saved") {
+            scheduleCategoryWarmup(currentCategory);
+        }
         if (typeof updateHeadlineTicker === "function") {
             updateHeadlineTicker();
         }
@@ -839,6 +842,49 @@ document.addEventListener("visibilitychange", function () {
 
 // STAGE 7 — IN-FLIGHT REQUEST DEDUPLICATION
 const categoryRequestsInFlight = {};
+let categoryWarmupTimer = null;
+let categoryWarmupIdleCallback = null;
+
+function scheduleCategoryWarmup(activeCategory) {
+    const navigableCategories = Object.keys(CATEGORY_MAP).filter(function (category) {
+        return category !== "saved" && category !== "jobs";
+    });
+    const activeIndex = navigableCategories.indexOf(activeCategory);
+    if (activeIndex < 0) return;
+
+    if (categoryWarmupTimer !== null) {
+        clearTimeout(categoryWarmupTimer);
+        categoryWarmupTimer = null;
+    }
+    if (categoryWarmupIdleCallback !== null &&
+        typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(categoryWarmupIdleCallback);
+        categoryWarmupIdleCallback = null;
+    }
+
+    const nextCategory = navigableCategories
+        .slice(activeIndex + 1)
+        .find(function (category) {
+            return !getFrontendCategoryCache(category);
+        });
+    if (!nextCategory) return;
+
+    const warmNextCategory = function () {
+        categoryWarmupTimer = null;
+        categoryWarmupIdleCallback = null;
+        if (document.hidden) return;
+        prefetchCategory(nextCategory);
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+        categoryWarmupIdleCallback = window.requestIdleCallback(
+            warmNextCategory,
+            { timeout: 1500 }
+        );
+    } else {
+        categoryWarmupTimer = window.setTimeout(warmNextCategory, 500);
+    }
+}
 
 async function prefetchCategory(category) {
     category = normalizeCategory(category);
@@ -983,6 +1029,8 @@ async function loadNews(category, forceFresh = false) {
             ""
         );
 
+        scheduleCategoryWarmup(category);
+
         console.log(
             "FRONTEND CACHE HIT:",
             category,
@@ -1113,6 +1161,8 @@ async function loadNews(category, forceFresh = false) {
             currentDisplayedArticles,
             ""
         );
+
+        scheduleCategoryWarmup(category);
 
     } catch (error) {
 
