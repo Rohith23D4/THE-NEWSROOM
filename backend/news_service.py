@@ -5462,6 +5462,7 @@ def get_news(
     ]
 
     previous = 0
+    processed_per_feed = 0
 
     for limit in limits:
 
@@ -5497,6 +5498,7 @@ def get_news(
                 batch,
                 category == "jobs",
             )
+            processed_per_feed = limit
 
             print(
                 "TIMING PROCESS BATCH:",
@@ -5532,9 +5534,16 @@ def get_news(
             candidates_by_feed
         ):
 
-            for item in candidates_by_feed[
-                feed_index
-            ]:
+            feed_items = candidates_by_feed[feed_index]
+            fallback_items = (
+                feed_items
+                if category == "jobs"
+                else feed_items[
+                    processed_per_feed:processed_per_feed + 12
+                ]
+            )
+
+            for item in fallback_items:
 
                 url = str(
                     item.get(
