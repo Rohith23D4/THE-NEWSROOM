@@ -930,17 +930,45 @@ function getCategoryData(category, url, forceFresh = false) {
         : category;
 
     if (!categoryRequestsInFlight[requestKey]) {
-        const requestPromise = fetch(url, {
-            method: "GET",
-            cache: "no-store"
-        }).then(function(response) {
-            if (!response.ok) {
-                throw new Error(
-                    `News request failed: ${response.status}`
-                );
+        const requestPromise = (async function() {
+            let lastError;
+
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                let response;
+
+                try {
+                    response = await fetch(url, {
+                        method: "GET",
+                        cache: "no-store"
+                    });
+                } catch (error) {
+                    lastError = error;
+                }
+
+                if (response && response.ok) {
+                    return response.json();
+                }
+
+                if (response) {
+                    lastError = new Error(
+                        `News request failed: ${response.status}`
+                    );
+                    if (![502, 503, 504].includes(response.status)) {
+                        throw lastError;
+                    }
+                }
+
+                if (attempt === 0) {
+                    // Render can briefly return a gateway error while a
+                    // category feed is warming or the service is recovering.
+                    await new Promise(function(resolve) {
+                        window.setTimeout(resolve, 2500);
+                    });
+                }
             }
-            return response.json();
-        });
+
+            throw lastError || new Error("News request failed.");
+        })();
 
         categoryRequestsInFlight[requestKey] = requestPromise;
         const clearRequest = function() {
