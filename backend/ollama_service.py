@@ -1637,6 +1637,13 @@ Return ONLY the explanation.
         else:
             explanation = str(result or "")
 
+        # Ollama can be unavailable when the app is hosted remotely. Its
+        # connection helper returns an empty string in that case, so keep the
+        # Explain action useful with the article's own text instead of making
+        # the endpoint fail with a 500 response.
+        if not explanation.strip():
+            return description or title
+
         return explanation.strip()
 
     except Exception as error:
