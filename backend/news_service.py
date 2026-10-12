@@ -5496,11 +5496,11 @@ def get_news(
 
             feed_items = candidates_by_feed[feed_index]
             # The first pass already checks four candidates per feed. Only
-            # inspect four more here: the source-balance limit is six stories
-            # per publisher, so processing the full RSS tail adds latency
-            # without increasing the maximum useful contribution per feed.
+            # inspect eight more here: the source-balance limit is six stories
+            # per publisher, so this supplies a small refill buffer without
+            # waiting on the full RSS tail.
             fallback_items = feed_items[
-                processed_per_feed:processed_per_feed + 4
+                processed_per_feed:processed_per_feed + 8
             ]
 
             for item in fallback_items:
