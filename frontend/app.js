@@ -839,40 +839,6 @@ document.addEventListener("visibilitychange", function () {
 
 // STAGE 7 — IN-FLIGHT REQUEST DEDUPLICATION
 const categoryRequestsInFlight = {};
-let categoryWarmupStarted = false;
-
-function scheduleCategoryWarmup() {
-    if (categoryWarmupStarted) return;
-    categoryWarmupStarted = true;
-
-    const categories = Object.keys(CATEGORY_MAP).filter(function (category) {
-        return category !== "saved" && category !== "jobs" && category !== currentCategory;
-    });
-
-    const warmNextCategory = function () {
-        if (categories.length === 0) return;
-        if (document.hidden) {
-            window.setTimeout(warmNextCategory, 5000);
-            return;
-        }
-
-        const category = categories.shift();
-        prefetchCategory(category).finally(function () {
-            if (categories.length === 0) return;
-            if (typeof window.requestIdleCallback === "function") {
-                window.requestIdleCallback(warmNextCategory, { timeout: 1500 });
-            } else {
-                window.setTimeout(warmNextCategory, 350);
-            }
-        });
-    };
-
-    if (typeof window.requestIdleCallback === "function") {
-        window.requestIdleCallback(warmNextCategory, { timeout: 2000 });
-    } else {
-        window.setTimeout(warmNextCategory, 800);
-    }
-}
 
 async function prefetchCategory(category) {
     category = normalizeCategory(category);
@@ -1012,8 +978,6 @@ async function loadNews(category, forceFresh = false) {
             searchInput.value = "";
         }
 
-        scheduleCategoryWarmup();
-
         renderNews(
             currentDisplayedArticles,
             ""
@@ -1149,8 +1113,6 @@ async function loadNews(category, forceFresh = false) {
             currentDisplayedArticles,
             ""
         );
-
-        scheduleCategoryWarmup();
 
     } catch (error) {
 
@@ -3601,7 +3563,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 let tickerRequestId = 0;
 const LATEST_HOT_BROWSER_CACHE_KEY = "newsroom-latest-hot-cache-v1";
-const LATEST_HOT_BROWSER_CACHE_TTL = 10 * 60 * 1000;
+const LATEST_HOT_BROWSER_CACHE_TTL = 5 * 60 * 1000;
 
 function renderHeadlineTicker(track, articles) {
     const uniqueTitles = new Set();
@@ -3652,6 +3614,7 @@ async function updateHeadlineTicker() {
         return;
     }
 
+    let browserCacheIsFresh = false;
     if (!track.querySelector("a.headline-item")) {
         try {
             const cached = JSON.parse(
@@ -3663,11 +3626,14 @@ async function updateHeadlineTicker() {
                 Date.now() - cached.timestamp <= LATEST_HOT_BROWSER_CACHE_TTL
             ) {
                 renderHeadlineTicker(track, cached.articles);
+                browserCacheIsFresh = true;
             }
         } catch (error) {
             console.debug("Latest & Hot browser cache could not be read:", error);
         }
     }
+
+    if (browserCacheIsFresh) return;
 
     if (!track.querySelector("a.headline-item")) {
         track.innerHTML = `

@@ -78,6 +78,25 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 
+@app.middleware("http")
+async def set_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path.lower()
+
+    if path == "/" or path.endswith(".html"):
+        # Keep page markup revalidated so updated asset versions take effect.
+        response.headers["Cache-Control"] = "no-cache"
+    elif path.endswith((".js", ".css")):
+        if request.query_params.get("v"):
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+            )
+        else:
+            response.headers["Cache-Control"] = "public, max-age=3600"
+
+    return response
+
+
 # ============================================================
 # CATEGORY MAP
 # ============================================================
