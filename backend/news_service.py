@@ -5459,9 +5459,6 @@ def get_news(
     limits = [
         4,
         8,
-        12,
-        16,
-        20,
     ]
 
     previous = 0
