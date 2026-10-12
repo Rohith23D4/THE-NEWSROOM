@@ -672,8 +672,10 @@ def news(category: str = "Latest", refresh: bool = False):
                 and len(str(article.get("description", "") or "").split()) >= 20
             ]
 
-        # Cache only complete, source-balanced category responses.
-        should_cache_response = len(articles) == 20
+        # Cache usable, source-balanced category responses too. A feed can
+        # temporarily provide fewer than 20 valid stories; keeping that
+        # result avoids repeating the slow publisher fetch on every visit.
+        should_cache_response = len(articles) >= 12
         if should_cache_response:
             response_sources = {
                 str(article.get("source", "Unknown")).strip() or "Unknown"
